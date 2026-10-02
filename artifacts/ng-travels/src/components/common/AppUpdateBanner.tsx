@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Download, X, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AppUpdateInfo } from "@/hooks/useAppUpdateCheck";
+import { openInSystemBrowser } from "@/lib/openExternal";
 
 export function AppUpdateBanner({ info }: { info: AppUpdateInfo }) {
   const [dismissed, setDismissed] = useState(false);
@@ -10,14 +11,9 @@ export function AppUpdateBanner({ info }: { info: AppUpdateInfo }) {
 
   const handleDownload = async () => {
     if (!info.downloadUrl) return;
-    try {
-      // In-app browser sheet on Android (no separate app switch); falls
-      // back to a normal new tab if @capacitor/browser isn't available.
-      const { Browser } = await import("@capacitor/browser");
-      await Browser.open({ url: info.downloadUrl });
-    } catch {
-      window.open(info.downloadUrl, "_blank");
-    }
+    // Full Chrome tab, not the in-app sheet — APK downloads stall at 100%
+    // inside a Custom Tab.
+    await openInSystemBrowser(info.downloadUrl);
   };
 
   return (

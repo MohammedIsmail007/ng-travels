@@ -3235,10 +3235,13 @@ router.get("/settings", requireOwner, async (_req, res): Promise<void> => {
  * valid update-check response and can prompt the user to install this one.
  */
 const CURRENT_APP_VERSION = {
-  versionCode: 12,
-  versionName: "1.3.4",
-  url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
-  releaseNotes: "Stand-to-stand KM tracking: record the odometer (with photo, now required) when the vehicle leaves the stand and when it returns, with stand-to-pickup and drop-to-stand distances shown on each trip. Delete customers, vehicles and drivers. Route Planner bookings now carry the full route into the trip form. Fixes duplicate bookings, missing new trips in the list, and save errors on long routes.",
+  versionCode: 13,
+  versionName: "1.3.5",
+  // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
+  // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
+  // download to full Chrome (see artifacts/ng-travels/public/update.html).
+  url: "https://ng-travels-operations-black.vercel.app/update.html",
+  releaseNotes: "Fixes the Download Update button: the APK now downloads in Chrome instead of getting stuck at 100% inside the app. Includes everything from 1.3.4 (stand-to-stand KM tracking, delete for customers/vehicles/drivers, Route Planner prefill and booking fixes).",
 };
 const APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,

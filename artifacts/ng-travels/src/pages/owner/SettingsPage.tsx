@@ -6,14 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AdminUserManagementModal, CreateStaffUserData } from "@/components/admin/AdminUserManagementModal";
 import { apiFetch } from "@/lib/apiFetch";
-import { openExternalUrl } from "@/lib/openExternal";
+import { openInSystemBrowser } from "@/lib/openExternal";
 
 // Fallback shown only until /api/app/version answers (or if it fails) —
 // the server's CURRENT_APP_VERSION (artifacts/api-server/src/routes/ng-travels.ts)
 // is the actual source of truth; re-upload the APK there after each build,
 // this local fallback just needs to stay roughly current for offline/error cases.
 const FALLBACK_APP_VERSION = {
-  versionName: "1.3.4",
+  versionName: "1.3.5",
   url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
   releaseNotes: "",
 };
@@ -220,7 +220,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </p>
           </div>
           <Button
-            onClick={() => openExternalUrl(appVersion.url)}
+            onClick={() => openInSystemBrowser(appVersion.url)}
             className="bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs py-5 px-5 shadow-lg shadow-amber-400/20 flex items-center gap-2 cursor-pointer whitespace-nowrap"
           >
             <Smartphone className="w-4 h-4" /> Download NG-Travels APK

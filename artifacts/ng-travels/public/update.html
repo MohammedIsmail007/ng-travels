@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NG Travels Update</title>
+  <link rel="icon" href="/favicon-32.png" />
+  <!--
+    The in-app "Download Update" button on app builds up to 1.3.4 opens this
+    page in a Chrome Custom Tab, where an APK download reaches 100% but never
+    finishes. This page hands the download to the full Chrome app via an
+    Android intent link, which completes normally. Opened in full Chrome or
+    on a desktop, the same button just downloads the APK.
+  -->
+  <style>
+    :root {
+      --bg: #fafaf9; --card: #ffffff; --text: #1c1917; --muted: #57534e;
+      --border: #e7e5e4; --accent: #fbbf24; --accent-text: #1c1917;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0c0a09; --card: #1c1917; --text: #fafaf9; --muted: #a8a29e; --border: #292524; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: var(--bg); color: var(--text); padding: 16px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .card {
+      width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 18px; padding: 28px 22px; text-align: center;
+    }
+    img { width: 64px; height: 64px; border-radius: 14px; }
+    h1 { font-size: 20px; margin: 14px 0 6px; }
+    p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0 0 20px; }
+    .btn {
+      display: block; width: 100%; padding: 15px; border-radius: 12px; border: 0;
+      background: var(--accent); color: var(--accent-text); font-size: 16px; font-weight: 700;
+      text-decoration: none;
+    }
+    .alt { display: inline-block; margin-top: 16px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img src="/ng-travels-logo.png" alt="NG Travels" />
+    <h1>Update NG Travels</h1>
+    <p>Tap the button to download the latest app in Chrome, then open the file to install it.</p>
+    <a id="download" class="btn" href="#">Download Update in Chrome</a>
+    <a id="direct" class="alt" href="#">Or download directly</a>
+  </div>
+  <script>
+    var APK_PATH = "nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk";
+    var APK_URL = "https://" + APK_PATH;
+    var isAndroid = /Android/i.test(navigator.userAgent);
+    // Opens the full Chrome app (not a Custom Tab); if Chrome can't be
+    // launched, Android falls back to the plain APK URL.
+    var CHROME_INTENT =
+      "intent://" + APK_PATH +
+      "#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=" +
+      encodeURIComponent(APK_URL) + ";end";
+
+    document.getElementById("download").href = isAndroid ? CHROME_INTENT : APK_URL;
+    document.getElementById("direct").href = APK_URL;
+  </script>
+</body>
+</html>
