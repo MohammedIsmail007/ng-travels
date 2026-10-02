@@ -630,6 +630,21 @@ export async function calculateRouteJourney(
 
   const isRoundTrip = tripType.toLowerCase().includes("round");
 
+  // Stops added as plain text (no autocomplete selection) arrive with only a
+  // name/address and no coordinates — geocode those here, the same way the
+  // pickup/destination text inputs are resolved above, so a typed waypoint
+  // still gets routed through instead of silently dropping out of the leg.
+  for (const stop of stops) {
+    if ((!stop.latitude || !stop.longitude) && (stop.address || stop.name)) {
+      const found = await searchPlaces(stop.address || stop.name);
+      if (found.length > 0) {
+        stop.latitude = found[0].latitude;
+        stop.longitude = found[0].longitude;
+        if (!stop.placeId) stop.placeId = found[0].placeId;
+      }
+    }
+  }
+
   const waypoints = stops
     .filter((s) => s.latitude && s.longitude)
     .map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));

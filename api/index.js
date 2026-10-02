@@ -96380,6 +96380,16 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
     throw new Error("Invalid pickup or destination coordinates for route calculation.");
   }
   const isRoundTrip = tripType.toLowerCase().includes("round");
+  for (const stop of stops) {
+    if ((!stop.latitude || !stop.longitude) && (stop.address || stop.name)) {
+      const found = await searchPlaces(stop.address || stop.name);
+      if (found.length > 0) {
+        stop.latitude = found[0].latitude;
+        stop.longitude = found[0].longitude;
+        if (!stop.placeId) stop.placeId = found[0].placeId;
+      }
+    }
+  }
   const waypoints = stops.filter((s) => s.latitude && s.longitude).map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
   const [outbound, returnLegResult] = await Promise.all([
     cachedDrivingLeg(
@@ -99202,10 +99212,13 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 11,
-  versionName: "1.3.3",
-  url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
-  releaseNotes: "Fixes the Settings page APK download button, which could get stuck at 100% inside the app \u2014 it now hands off to Chrome to download and install."
+  versionCode: 13,
+  versionName: "1.3.5",
+  // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
+  // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
+  // download to full Chrome (see artifacts/ng-travels/public/update.html).
+  url: "https://ng-travels-operations-black.vercel.app/update.html",
+  releaseNotes: "Fixes the Download Update button: the APK now downloads in Chrome instead of getting stuck at 100% inside the app. Includes everything from 1.3.4 (stand-to-stand KM tracking, delete for customers/vehicles/drivers, Route Planner prefill and booking fixes)."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
