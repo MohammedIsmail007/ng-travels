@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { NGTravelsLoader } from "@/components/loading";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 
 export const VehiclesPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -18,6 +19,7 @@ export const VehiclesPage: React.FC = () => {
   const [filterType, setFilterType] = useState("all");
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<any | null>(null);
+  const [deletingVehicle, setDeletingVehicle] = useState<any | null>(null);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -111,6 +113,25 @@ export const VehiclesPage: React.FC = () => {
       toast.success("Vehicle updated successfully!");
       setEditingVehicle(null);
       resetForm();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  // Delete Mutation (server archives the vehicle so past trips keep their record)
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiFetch(`/api/vehicles/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || "Failed to delete vehicle");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast.success("Vehicle deleted");
+      setDeletingVehicle(null);
     },
     onError: (err: any) => toast.error(err.message),
   });
@@ -325,13 +346,22 @@ export const VehiclesPage: React.FC = () => {
                     <h3 className="text-base font-extrabold text-foreground mt-1.5">{v.brand} {v.model}</h3>
                     <div className="text-[11px] text-muted-foreground">{v.vehicleType} • {v.capacity} Seater • {v.fuelType}</div>
                   </div>
-                  <button
-                    onClick={() => handleOpenEdit(v)}
-                    className="p-1.5 rounded-lg bg-muted/80 hover:bg-muted text-foreground transition-colors cursor-pointer"
-                    title="Edit vehicle"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleOpenEdit(v)}
+                      className="p-1.5 rounded-lg bg-muted/80 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                      title="Edit vehicle"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingVehicle(v)}
+                      className="p-1.5 rounded-lg bg-muted/80 hover:bg-rose-100 hover:dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors cursor-pointer"
+                      title="Delete vehicle"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Assigned Driver */}
@@ -585,6 +615,20 @@ export const VehiclesPage: React.FC = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDeleteDialog
+        isOpen={Boolean(deletingVehicle)}
+        title="Delete Vehicle"
+        description={
+          <>
+            Remove <strong className="text-foreground">{deletingVehicle?.vehicleNumber}</strong> ({deletingVehicle?.brand} {deletingVehicle?.model}) from the fleet?
+            Past trips keep their vehicle record. Vehicles on open trips can't be deleted until those trips are reassigned or closed.
+          </>
+        }
+        loading={deleteMutation.isPending}
+        onConfirm={() => deletingVehicle && deleteMutation.mutate(deletingVehicle.id)}
+        onClose={() => setDeletingVehicle(null)}
+      />
     </div>
   );
 };

@@ -15,6 +15,7 @@ interface DriverDashboardPageProps {
   isLoading?: boolean;
   onOpenStartKmModal: (trip: any) => void;
   onOpenEndKmModal: (trip: any) => void;
+  onOpenStandKmModal?: (trip: any) => void;
   onOpenExpenseModal: (tripId: number) => void;
 }
 
@@ -25,6 +26,7 @@ export const DriverDashboardPage: React.FC<DriverDashboardPageProps> = ({
   isLoading = false,
   onOpenStartKmModal,
   onOpenEndKmModal,
+  onOpenStandKmModal,
   onOpenExpenseModal,
 }) => {
   // A plain default param doesn't cover an explicit `null` prop (only
@@ -110,6 +112,13 @@ export const DriverDashboardPage: React.FC<DriverDashboardPageProps> = ({
                 className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs py-5"
               >
                 <CheckCircle2 className="w-4 h-4 mr-1.5" /> End Trip (KM)
+              </Button>
+            ) : activeTrip.standReturnKm == null && onOpenStandKmModal ? (
+              <Button
+                onClick={() => onOpenStandKmModal(activeTrip)}
+                className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs py-5"
+              >
+                <Gauge className="w-4 h-4 mr-1.5" /> Back at Stand (KM)
               </Button>
             ) : (
               <Button disabled className="bg-muted text-muted-foreground font-bold text-xs py-5">

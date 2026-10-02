@@ -10,12 +10,34 @@ export interface DriverKmModalProps {
   isOpen: boolean;
   onClose: () => void;
   trip: any;
-  mode: "start" | "end";
+  // start: pickup reading · end: drop reading · stand: back at the stand
+  mode: "start" | "end" | "stand";
   onSuccess: (updatedTrip: any) => void | Promise<void>;
 }
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+
+const MODE_TEXT = {
+  start: {
+    title: "Enter Starting Odometer KM",
+    label: "Pickup Odometer Reading (KM)",
+    submit: "Confirm & Start Trip",
+    loading: "Starting your journey...",
+  },
+  end: {
+    title: "Enter Ending Odometer KM",
+    label: "Ending Odometer Reading (KM)",
+    submit: "Validate & Complete Trip",
+    loading: "Completing trip...",
+  },
+  stand: {
+    title: "Back at Stand — Odometer KM",
+    label: "Odometer Reading at Stand (KM)",
+    submit: "Save Back-at-Stand KM",
+    loading: "Saving reading...",
+  },
+} as const;
 
 export const DriverKmModal: React.FC<DriverKmModalProps> = ({
   isOpen,
@@ -24,9 +46,14 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
   mode,
   onSuccess,
 }) => {
+  // Pre-fill with the previous reading in the chain (pickup for the drop,
+  // drop for back-at-stand); the pickup reading starts blank on purpose so
+  // the stand-out reading isn't submitted unchanged by mistake.
   const [kmValue, setKmValue] = useState<string>(() => {
-    if (mode === "end" && trip?.startingKm) {
-      return String(trip.startingKm);
+    if (mode === "end" && trip?.startingKm != null) return String(trip.startingKm);
+    if (mode === "stand") {
+      if (trip?.standReturnKm != null) return String(trip.standReturnKm);
+      if (trip?.endingKm != null) return String(trip.endingKm);
     }
     return "";
   });
@@ -39,9 +66,19 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
 
   if (!trip) return null;
 
+  const text = MODE_TEXT[mode];
+  const enteredKm = Number(kmValue || 0);
+  const standStartKm = trip.standStartKm != null ? Number(trip.standStartKm) : null;
   const startKm = Number(trip.startingKm || 0);
-  const endKm = Number(kmValue || 0);
-  const calculatedActual = mode === "end" && endKm >= startKm ? endKm - startKm : 0;
+  const dropKm = Number(trip.endingKm || 0);
+  // The reading this one can't go below, and the leg it closes
+  const previous =
+    mode === "start"
+      ? standStartKm != null ? { label: "Left Stand At", km: standStartKm, leg: "Stand → Pickup KM" } : null
+      : mode === "end"
+      ? { label: "Recorded Starting KM", km: startKm, leg: "Calculated Actual KM" }
+      : { label: "Drop KM", km: dropKm, leg: "Drop → Stand KM" };
+  const legKm = previous && enteredKm >= previous.km ? Math.round((enteredKm - previous.km) * 100) / 100 : 0;
 
   const handlePickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,8 +112,8 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
       return;
     }
 
-    if (mode === "end" && endKm < startKm) {
-      setError(`Ending KM (${endKm}) cannot be less than Starting KM (${startKm}).`);
+    if (previous && enteredKm < previous.km) {
+      setError(`${text.label.replace(" (KM)", "")} (${enteredKm}) cannot be less than ${previous.label} (${previous.km}).`);
       return;
     }
 
@@ -104,11 +141,15 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
 
       const endpoint = mode === "start"
         ? `/api/driver/trips/${trip.id}/start`
-        : `/api/driver/trips/${trip.id}/complete`;
+        : mode === "end"
+        ? `/api/driver/trips/${trip.id}/complete`
+        : `/api/trips/${trip.id}/stand-return`;
 
       const payload = mode === "start"
         ? { startingKm: Number(kmValue), photoUrl }
-        : { endingKm: Number(kmValue), photoUrl };
+        : mode === "end"
+        ? { endingKm: Number(kmValue), photoUrl }
+        : { standReturnKm: Number(kmValue), photoUrl };
 
       const res = await apiFetch(endpoint, {
         method: "POST",
@@ -117,8 +158,9 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        setError(errData.error || "Failed to update odometer.");
+        const errData = await res.json().catch(() => null);
+        // error is usually { code, message } — never render the object itself
+        setError(errData?.error?.message || (typeof errData?.error === "string" ? errData.error : null) || "Failed to update odometer.");
         return;
       }
 
@@ -140,7 +182,13 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
   return (
     <>
       {loading && (
-        <TripActionLoader action={mode === "start" ? "start" : "complete"} />
+        <TripActionLoader
+          action={mode === "start" ? "start" : "complete"}
+          {...(mode === "stand" && {
+            title: "Saving back-at-stand reading...",
+            subtext: "Recording the stand odometer and drop to stand distance...",
+          })}
+        />
       )}
 
       <Dialog open={isOpen} onOpenChange={onClose}>
@@ -148,7 +196,7 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
           <DialogHeader>
             <DialogTitle className="text-base font-bold text-foreground flex items-center gap-2">
               <Gauge className="w-5 h-5 text-amber-700 dark:text-amber-400" />
-              {mode === "start" ? "Enter Starting Odometer KM" : "Enter Ending Odometer KM"}
+              {text.title}
             </DialogTitle>
           </DialogHeader>
 
@@ -156,17 +204,17 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
             <div className="bg-card/60 p-3 rounded-lg border border-border space-y-1">
               <div className="text-muted-foreground">Booking: <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">{trip.bookingId}</span></div>
               <div className="text-foreground font-medium">{trip.pickup?.name} ➔ {trip.destination?.name}</div>
-              {mode === "end" && (
+              {previous && (
                 <div className="text-muted-foreground pt-1 border-t border-border flex justify-between">
-                  <span>Recorded Starting KM:</span>
-                  <span className="font-mono font-bold text-foreground">{startKm} km</span>
+                  <span>{previous.label}:</span>
+                  <span className="font-mono font-bold text-foreground">{previous.km} km</span>
                 </div>
               )}
             </div>
 
             <div>
               <label className="text-xs text-amber-700 dark:text-amber-400 font-semibold uppercase block mb-1.5">
-                {mode === "start" ? "Starting Odometer Reading (KM)" : "Ending Odometer Reading (KM)"}
+                {text.label}
               </label>
               <Input
                 type="number"
@@ -177,11 +225,11 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
               />
             </div>
 
-            {mode === "end" && (
+            {previous && (
               <div className="bg-amber-950/20 border border-amber-300 dark:border-amber-500/30 rounded-lg p-3 flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Calculated Actual KM:</span>
+                <span className="text-muted-foreground">{previous.leg}:</span>
                 <span className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                  {calculatedActual} km
+                  {legKm} km
                 </span>
               </div>
             )}
@@ -248,13 +296,11 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
               className="w-full bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold py-5 text-sm disabled:opacity-50"
             >
               {loading ? (
-                <ButtonLoader
-                  label={mode === "start" ? "Starting your journey..." : "Completing trip..."}
-                />
+                <ButtonLoader label={text.loading} />
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                  {mode === "start" ? "Confirm & Start Trip" : "Validate & Complete Trip"}
+                  {text.submit}
                 </>
               )}
             </Button>

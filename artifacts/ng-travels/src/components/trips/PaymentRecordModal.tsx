@@ -82,10 +82,19 @@ export const PaymentRecordModal: React.FC<PaymentRecordModalProps> = ({
                 <span className="text-muted-foreground">Booking: <strong className="text-amber-700 dark:text-amber-400 font-mono">{trip.bookingId}</strong></span>
                 <span className="text-muted-foreground">Customer: <strong className="text-foreground">{trip.customerName || "Customer"}</strong></span>
               </div>
-              <div className="flex justify-between pt-1 border-t border-border/80 font-mono text-[11px]">
-                <span>Total Fare: <strong className="text-foreground">{formatINR(totalFare)}</strong></span>
-                <span>Paid So Far: <strong className="text-emerald-700 dark:text-emerald-400">{formatINR(totalPaid)}</strong></span>
-                <span>Due Balance: <strong className="text-amber-700 dark:text-amber-400">{formatINR(remaining)}</strong></span>
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/80">
+                <div>
+                  <span className="block text-[11px] text-muted-foreground">Total Fare</span>
+                  <strong className="block font-mono text-base text-foreground">{formatINR(totalFare)}</strong>
+                </div>
+                <div>
+                  <span className="block text-[11px] text-muted-foreground">Paid So Far</span>
+                  <strong className="block font-mono text-base text-emerald-700 dark:text-emerald-400">{formatINR(totalPaid)}</strong>
+                </div>
+                <div className="text-right">
+                  <span className="block text-[11px] text-muted-foreground">Due Balance</span>
+                  <strong className="block font-mono text-lg font-black text-amber-700 dark:text-amber-400">{formatINR(remaining)}</strong>
+                </div>
               </div>
             </div>
 

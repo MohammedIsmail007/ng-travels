@@ -74,6 +74,7 @@ import { DriverLayout } from "@/components/layout/DriverLayout";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AppSplashLoader, ButtonLoader } from "@/components/loading";
@@ -116,7 +117,18 @@ import { DriverProfilePage } from "@/pages/driver/DriverProfilePage";
 import { DriverVehiclePage } from "@/pages/driver/DriverVehiclePage";
 import { DriverHistoryPage } from "@/pages/driver/DriverHistoryPage";
 
-const queryClient = new QueryClient();
+// Realtime events (SSE + Supabase) invalidate exactly what changed, so
+// cached data can be reused for a while instead of refetched on every
+// mount/focus. Failed requests retry once and keep the last good data.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      retry: 1,
+      refetchOnWindowFocus: true, // only refetches queries that are stale
+    },
+  },
+});
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function stripBase(path: string) {
@@ -1195,7 +1207,7 @@ function MainApp() {
   } | null>(null);
   const [driverKmTrip, setDriverKmTrip] = useState<{
     trip: any;
-    mode: "start" | "end";
+    mode: "start" | "end" | "stand";
   } | null>(null);
   const [driverExpenseTripId, setDriverExpenseTripId] = useState<number | null>(
     null,
@@ -1204,224 +1216,135 @@ function MainApp() {
     any | null
   >(null);
 
-  // Helper for safe query responses
-  const safeJsonArray = async (res: Response) => {
-    if (!res.ok) return [];
-    try {
-      const json = await res.json();
-      return Array.isArray(json)
-        ? json
-        : Array.isArray(json?.items)
-          ? json.items
-          : [];
-    } catch {
-      return [];
-    }
+  const isDriverPath =
+    location === "/driver" || location.startsWith("/driver/");
+  // The app is now a single unified build for both roles (no more
+  // separate Owner/Driver APKs pinning a fixed workspace) — the real
+  // server-side account role is what decides this, same as the web app.
+  // A genuine driver account can never render the owner workspace —
+  // regardless of path or the cosmetic switchRole() preview state — since
+  // owner-only actions there would just 403 against the real server-side
+  // role anyway.
+  const isDriverWorkspace =
+    user?.realRole === "driver"
+      ? true
+      : isDriverPath || user?.role === "driver";
+
+  // Each workspace only loads the endpoints it renders — the owner app no
+  // longer polls driver endpoints and the driver app no longer calls
+  // owner-only ones that just 403.
+  const ownerQueriesEnabled = isSignedIn && !isDriverWorkspace;
+  const driverQueriesEnabled = isSignedIn && isDriverWorkspace;
+  // Realtime push keeps data fresh; only fall back to slow polling while
+  // the realtime connection is down.
+  const fallbackPoll = realtimeStatus === "connected" ? false : 60_000;
+
+  const roleHeaders = { "x-user-role": user?.role || "owner" };
+
+  // Throw on failure instead of resolving to an empty value: React Query
+  // then keeps the last good data on screen (and retries) rather than a
+  // transient 401/503/network blip wiping the list until the next fetch.
+  const fetchJson = async (url: string, headers: Record<string, string> = roleHeaders) => {
+    const res = await apiFetch(url, { headers });
+    if (!res.ok) throw new Error(`${url} failed (${res.status})`);
+    return res.json();
+  };
+  const fetchList = async (url: string, headers?: Record<string, string>) => {
+    const json = await fetchJson(url, headers);
+    return Array.isArray(json) ? json : Array.isArray(json?.items) ? json.items : [];
+  };
+  const fetchObject = async (url: string, headers?: Record<string, string>) => {
+    const json = await fetchJson(url, headers);
+    return json && typeof json === "object" && !json.error ? json : null;
   };
 
   // Queries
   const { data: dashboardData = {}, isLoading: dashboardLoading } = useQuery({
     queryKey: ["/api/dashboard"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/dashboard", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        if (!res.ok) return {};
-        const json = await res.json();
-        return json && typeof json === "object" && !json.error ? json : {};
-      } catch {
-        return {};
-      }
-    },
-    refetchInterval: 15000,
+    enabled: ownerQueriesEnabled,
+    queryFn: async () => (await fetchObject("/api/dashboard")) || {},
+    refetchInterval: fallbackPoll,
   });
 
   const { data: tripsData = [], isLoading: tripsLoading } = useQuery({
     queryKey: ["/api/trips"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/trips?limit=100", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
-    refetchInterval: 15000,
+    enabled: ownerQueriesEnabled,
+    queryFn: () => fetchList("/api/trips?limit=100"),
+    refetchInterval: fallbackPoll,
   });
 
   const { data: customersData = [], isLoading: customersLoading } = useQuery({
     queryKey: ["/api/customers"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/customers?limit=100", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled,
+    queryFn: () => fetchList("/api/customers?limit=100"),
   });
 
   const { data: driversData = [], isLoading: driversLoading } = useQuery({
     queryKey: ["/api/drivers"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/drivers", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled,
+    queryFn: () => fetchList("/api/drivers"),
   });
 
   const { data: rawVehicles = [], isLoading: vehiclesLoading } = useQuery({
     queryKey: ["/api/vehicles"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/vehicles", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled,
+    queryFn: () => fetchList("/api/vehicles"),
   });
 
   const { data: enquiriesData = [], isLoading: enquiriesLoading } = useQuery({
     queryKey: ["/api/enquiries"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/enquiries", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    // Page-specific lists load only while their page is open
+    enabled: ownerQueriesEnabled && location === "/enquiries",
+    queryFn: () => fetchList("/api/enquiries"),
   });
 
   const { data: paymentsData = [], isLoading: paymentsLoading } = useQuery({
     queryKey: ["/api/payments"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/payments", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled,
+    queryFn: () => fetchList("/api/payments"),
   });
 
+  // Used by both workspaces (driver expense history + owner approvals)
   const { data: expensesData = [], isLoading: expensesLoading } = useQuery({
     queryKey: ["/api/expenses"],
     enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/expenses", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    queryFn: () => fetchList("/api/expenses"),
   });
 
   const { data: notificationsData = [], isLoading: notificationsLoading } = useQuery({
     queryKey: ["/api/notifications"],
     enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/notifications", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
-    refetchInterval: 15000,
+    queryFn: () => fetchList("/api/notifications"),
+    refetchInterval: fallbackPoll,
   });
 
   const { data: auditLogsData = [], isLoading: auditLogsLoading } = useQuery({
     queryKey: ["/api/audit-logs"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/audit-logs", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled && location === "/audit-logs",
+    queryFn: () => fetchList("/api/audit-logs"),
   });
 
   const { data: settingsData = {} } = useQuery({
     queryKey: ["/api/settings"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/settings", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        if (!res.ok) return {};
-        const json = await res.json();
-        return json && typeof json === "object" ? json : {};
-      } catch {
-        return {};
-      }
-    },
+    enabled: ownerQueriesEnabled,
+    queryFn: async () => (await fetchObject("/api/settings")) || {},
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: staffUsersData = [], isLoading: staffUsersLoading } = useQuery({
     queryKey: ["/api/admin/users"],
-    enabled: isSignedIn && user?.realRole !== "driver",
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/admin/users", {
-          headers: { "x-user-role": user?.role || "owner" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
+    enabled: ownerQueriesEnabled && user?.realRole !== "driver" && location === "/settings",
+    queryFn: () => fetchList("/api/admin/users"),
   });
 
   // Dedicated Driver Queries
+  const driverHeaders = { "x-user-role": "driver" };
+
   const { data: driverTodayTrips = [], isLoading: driverTodayLoading } = useQuery({
     queryKey: ["/api/driver/today"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/driver/today", {
-          headers: { "x-user-role": "driver" },
-        });
-        return await safeJsonArray(res);
-      } catch {
-        return [];
-      }
-    },
-    refetchInterval: 6000,
+    enabled: driverQueriesEnabled,
+    queryFn: () => fetchList("/api/driver/today", driverHeaders),
+    refetchInterval: fallbackPoll,
   });
 
   // The signed-in driver's own profile. /api/drivers is owner-only and 403s
@@ -1429,37 +1352,15 @@ function MainApp() {
   // rather than by searching the (inaccessible) fleet-wide driver list.
   const { data: driverMe = null } = useQuery({
     queryKey: ["/api/driver/me"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/driver/me", {
-          headers: { "x-user-role": "driver" },
-        });
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json && typeof json === "object" && !json.error ? json : null;
-      } catch {
-        return null;
-      }
-    },
+    enabled: driverQueriesEnabled,
+    queryFn: () => fetchObject("/api/driver/me", driverHeaders),
   });
 
   const { data: driverCurrentTrip } = useQuery({
     queryKey: ["/api/driver/current-trip"],
-    enabled: isSignedIn,
-    queryFn: async () => {
-      try {
-        const res = await apiFetch("/api/driver/current-trip", {
-          headers: { "x-user-role": "driver" },
-        });
-        if (!res.ok) return null;
-        const json = await res.json();
-        return json && typeof json === "object" && !json.error ? json : null;
-      } catch {
-        return null;
-      }
-    },
-    refetchInterval: 6000,
+    enabled: driverQueriesEnabled,
+    queryFn: () => fetchObject("/api/driver/current-trip", driverHeaders),
+    refetchInterval: fallbackPoll,
   });
 
   // Normalized collections: guarantees an array whether data is { items: [] } or raw array []
@@ -1675,20 +1576,6 @@ function MainApp() {
     ]);
   };
 
-  const isDriverPath =
-    location === "/driver" || location.startsWith("/driver/");
-  // The app is now a single unified build for both roles (no more
-  // separate Owner/Driver APKs pinning a fixed workspace) — the real
-  // server-side account role is what decides this, same as the web app.
-  // A genuine driver account can never render the owner workspace —
-  // regardless of path or the cosmetic switchRole() preview state — since
-  // owner-only actions there would just 403 against the real server-side
-  // role anyway.
-  const isDriverWorkspace =
-    user?.realRole === "driver"
-      ? true
-      : isDriverPath || user?.role === "driver";
-
   if (!isLoaded) {
     return (
       <AppSplashLoader
@@ -1746,6 +1633,9 @@ function MainApp() {
                 onOpenEndKmModal={(trip) =>
                   setDriverKmTrip({ trip, mode: "end" })
                 }
+                onOpenStandKmModal={(trip) =>
+                  setDriverKmTrip({ trip, mode: "stand" })
+                }
                 onOpenExpenseModal={(tripId) => setDriverExpenseTripId(tripId)}
               />
             </Route>
@@ -1761,6 +1651,9 @@ function MainApp() {
                 onOpenEndKmModal={(trip) =>
                   setDriverKmTrip({ trip, mode: "end" })
                 }
+                onOpenStandKmModal={(trip) =>
+                  setDriverKmTrip({ trip, mode: "stand" })
+                }
                 onOpenExpenseModal={(tripId) => setDriverExpenseTripId(tripId)}
               />
             </Route>
@@ -1774,6 +1667,9 @@ function MainApp() {
                 onOpenEndKmModal={(trip) =>
                   setDriverKmTrip({ trip, mode: "end" })
                 }
+                onOpenStandKmModal={(trip) =>
+                  setDriverKmTrip({ trip, mode: "stand" })
+                }
               />
             </Route>
             <Route path="/driver/current-trip">
@@ -1784,6 +1680,9 @@ function MainApp() {
                 }
                 onOpenEndKmModal={(trip) =>
                   setDriverKmTrip({ trip, mode: "end" })
+                }
+                onOpenStandKmModal={(trip) =>
+                  setDriverKmTrip({ trip, mode: "stand" })
                 }
                 onOpenExpenseModal={(tripId) => setDriverExpenseTripId(tripId)}
                 onUpdateMilestone={handleDriverMilestone}
@@ -1888,21 +1787,9 @@ function MainApp() {
             <Route path="/route-planner">
               <RoutePlannerPage
                 onOpenTripWizardWithRoute={(routeData) => {
-                  if (routeData) {
-                    setInitialEnquiryForTrip({
-                      pickup:
-                        routeData.pickup?.address ||
-                        routeData.pickup?.name ||
-                        routeData.pickup,
-                      destination:
-                        routeData.destination?.address ||
-                        routeData.destination?.name ||
-                        routeData.destination,
-                      tripType: routeData.tripType || "round_trip",
-                    });
-                  } else {
-                    setInitialEnquiryForTrip(null);
-                  }
+                  // Hand the whole plan over (coordinates, stops, KM, toll,
+                  // route options) so the wizard matches the planner exactly.
+                  setInitialEnquiryForTrip(routeData || null);
                   setCreateTripOpen(true);
                 }}
               />
@@ -1944,6 +1831,7 @@ function MainApp() {
                     onOpenAssignDriver={(trip) => setAssignDriverTrip(trip)}
                     onOpenStartKmModal={(trip) => setDriverKmTrip({ trip, mode: "start" })}
                     onOpenEndKmModal={(trip) => setDriverKmTrip({ trip, mode: "end" })}
+                    onOpenStandKmModal={(trip) => setDriverKmTrip({ trip, mode: "stand" })}
                     onUpdateMilestone={handleDriverMilestone}
                     onOpenExpenseModal={(tripId) => setDriverExpenseTripId(tripId)}
                     onApproveExpense={handleApproveExpense}
@@ -2177,6 +2065,7 @@ export default function App() {
               </Router>
             </LocalAuthProvider>
             <Toaster />
+            <SonnerToaster position="top-center" richColors />
           </TooltipProvider>
         </QueryClientProvider>
       </ThemeProvider>

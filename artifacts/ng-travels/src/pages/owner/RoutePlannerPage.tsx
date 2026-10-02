@@ -52,6 +52,8 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
   const [tollStatus, setTollStatus] = useState<string>("Unavailable / At Actuals");
   const [estimatedToll, setEstimatedToll] = useState<number>(0);
+  const [tollPlazas, setTollPlazas] = useState<any[]>([]);
+  const [tollRateMode, setTollRateMode] = useState<string | null>(null);
 
   const reqIdRef = useRef(0);
 
@@ -114,6 +116,8 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
       setRouteCoordinates(data.routeCoordinates || []);
       setTollStatus(data.tollStatus || "Unavailable / At Actuals");
       setEstimatedToll(data.apiEstimatedToll || 0);
+      setTollPlazas(Array.isArray(data.tollPlazas) ? data.tollPlazas : []);
+      setTollRateMode(data.tollRateMode || null);
     } catch (err: any) {
       if (thisReqId === reqIdRef.current) {
         setErrorMessage("Network error calculating driving route. Please check connection and try again.");
@@ -131,6 +135,40 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
   }, [tripType]);
 
   const selected = routes[selectedRouteIdx] || routes[0];
+
+  // Everything the trip wizard needs to show this exact route: locations,
+  // stops, distances, toll, durations, polylines and the chosen route option.
+  // Picking a non-primary option mirrors what selecting it inside the wizard
+  // does (its single distance/toll replace the primary route's legs).
+  const buildRoutePlan = () => {
+    const isAlternative = selectedRouteIdx > 0 && Boolean(selected);
+    const toLocation = (place: PlaceSuggestion | null, text: string) =>
+      place
+        ? { name: place.name, address: place.formattedAddress, latitude: place.lat, longitude: place.lng, placeId: place.placeId }
+        : { name: text, address: text };
+
+    return {
+      pickup: toLocation(selectedPickup, pickupInput),
+      destination: toLocation(selectedDest, destInput),
+      stops: stops.filter((st) => st.trim() !== "").map((st) => ({ name: st, address: st })),
+      tripType: tripType === "round" ? "round_trip" : "single_trip",
+      routes,
+      selectedRouteIdx,
+      routeSummary: selected?.summary || "",
+      totalMapKm: isAlternative ? selected.distanceKm : totalMapKm || selected?.distanceKm || 0,
+      outboundMapKm: isAlternative ? 0 : outboundMapKm,
+      returnMapKm: isAlternative ? 0 : returnMapKm,
+      estimatedToll: isAlternative ? selected.estimatedToll || 0 : estimatedToll,
+      outboundDurationMinutes: isAlternative ? selected.durationMinutes || 0 : outboundDurationMinutes,
+      returnDurationMinutes: isAlternative ? 0 : returnDurationMinutes,
+      outboundCoordinates: isAlternative ? selected.polylineCoordinates || [] : outboundCoordinates,
+      returnCoordinates: isAlternative ? [] : returnCoordinates,
+      routeCoordinates: isAlternative ? [] : routeCoordinates,
+      tollPlazas: isAlternative ? [] : tollPlazas,
+      tollRateMode,
+      tollStatus,
+    };
+  };
 
   const handleSelectPickup = (p: any) => {
     setSelectedPickup(p);
@@ -157,17 +195,7 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
         {onOpenTripWizardWithRoute && (
           <Button
             size="sm"
-            onClick={() => onOpenTripWizardWithRoute({
-              pickup: selectedPickup ? { name: selectedPickup.name, address: selectedPickup.formattedAddress, latitude: selectedPickup.lat, longitude: selectedPickup.lng, placeId: selectedPickup.placeId } : { name: pickupInput, address: pickupInput },
-              destination: selectedDest ? { name: selectedDest.name, address: selectedDest.formattedAddress, latitude: selectedDest.lat, longitude: selectedDest.lng, placeId: selectedDest.placeId } : { name: destInput, address: destInput },
-              billingKm: totalMapKm || selected?.distanceKm || 0,
-              outboundMapKm,
-              returnMapKm,
-              totalMapKm,
-              estimatedToll,
-              routeSummary: selected?.summary || "",
-              tripType: tripType === "round" ? "round_trip" : "single_trip",
-            })}
+            onClick={() => onOpenTripWizardWithRoute(buildRoutePlan())}
             className="bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs h-9 px-4 shadow-lg shadow-amber-400/20 flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Dispatch Trip With This Route
@@ -428,17 +456,7 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
 
               {onOpenTripWizardWithRoute && (
                 <Button
-                  onClick={() => onOpenTripWizardWithRoute({
-                    pickup: selectedPickup ? { name: selectedPickup.name, address: selectedPickup.formattedAddress, latitude: selectedPickup.lat, longitude: selectedPickup.lng, placeId: selectedPickup.placeId } : { name: pickupInput, address: pickupInput },
-                    destination: selectedDest ? { name: selectedDest.name, address: selectedDest.formattedAddress, latitude: selectedDest.lat, longitude: selectedDest.lng, placeId: selectedDest.placeId } : { name: destInput, address: destInput },
-                    billingKm: totalMapKm || selected.distanceKm,
-                    outboundMapKm,
-                    returnMapKm,
-                    totalMapKm,
-                    estimatedToll,
-                    routeSummary: selected.summary,
-                    tripType: tripType === "round" ? "round_trip" : "single_trip",
-                  })}
+                  onClick={() => onOpenTripWizardWithRoute(buildRoutePlan())}
                   className="bg-amber-400 hover:bg-amber-300 text-zinc-950 font-black text-xs h-10 px-5 shadow-xl shadow-amber-400/25 flex items-center gap-1.5 cursor-pointer w-full sm:w-auto flex-shrink-0"
                 >
                   <Plus className="w-4 h-4" /> Book This Route

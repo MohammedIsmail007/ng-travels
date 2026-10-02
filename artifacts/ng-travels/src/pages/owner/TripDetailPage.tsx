@@ -22,6 +22,7 @@ interface TripDetailPageProps {
   onOpenAssignDriver: (trip: any) => void;
   onOpenStartKmModal: (trip: any) => void;
   onOpenEndKmModal: (trip: any) => void;
+  onOpenStandKmModal?: (trip: any) => void;
   onUpdateMilestone: (tripId: number, status: string, note?: string) => Promise<void>;
   onOpenExpenseModal: (tripId: number) => void;
   onApproveExpense?: (expenseId: number) => void | Promise<void>;
@@ -40,6 +41,7 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
   onOpenAssignDriver,
   onOpenStartKmModal,
   onOpenEndKmModal,
+  onOpenStandKmModal,
   onUpdateMilestone,
   onOpenExpenseModal,
   onApproveExpense,
@@ -250,55 +252,68 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
               <Gauge className="w-4 h-4 text-amber-700 dark:text-amber-400" /> Driver & Odometer KM Tracking
             </h2>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-background/60 p-3 rounded-lg border border-border text-xs">
-              <div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-background/60 p-3 rounded-lg border border-border text-xs">
+              <div className="col-span-2 sm:col-span-1">
                 <span className="text-muted-foreground text-[10px] block">Assigned Driver</span>
                 <span className="font-bold text-foreground">{trip.driverName || "Unassigned"}</span>
                 <span className="text-muted-foreground block text-[11px]">{trip.driverMobile || "No phone"}</span>
               </div>
-              <div>
-                <span className="text-muted-foreground text-[10px] block">Starting KM</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono font-bold text-foreground text-sm">
-                    {trip.startingKm ? `${trip.startingKm} km` : "Pending"}
-                  </span>
-                  {trip.startKmPhoto && (
-                    <button
-                      type="button"
-                      onClick={() => openExternalUrl(trip.startKmPhoto)}
-                      title="View odometer photo"
-                      className="shrink-0 cursor-pointer"
-                    >
-                      <img src={trip.startKmPhoto} alt="Starting odometer" className="w-6 h-6 rounded object-cover border border-border hover:border-amber-400 transition-colors" />
-                    </button>
-                  )}
+              {[
+                { label: "Left Stand", km: trip.standStartKm, photo: trip.standStartPhoto },
+                { label: "Pickup (Start)", km: trip.startingKm, photo: trip.startKmPhoto },
+                { label: "Drop (End)", km: trip.endingKm, photo: trip.endKmPhoto },
+                { label: "Back at Stand", km: trip.standReturnKm, photo: trip.standReturnPhoto },
+              ].map((reading) => (
+                <div key={reading.label}>
+                  <span className="text-muted-foreground text-[10px] block">{reading.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-bold text-foreground text-sm">
+                      {reading.km != null && reading.km !== "" ? `${reading.km} km` : "Pending"}
+                    </span>
+                    {reading.photo && (
+                      <button
+                        type="button"
+                        onClick={() => openExternalUrl(reading.photo)}
+                        title="View odometer photo"
+                        className="shrink-0 cursor-pointer"
+                      >
+                        <img src={reading.photo} alt={`${reading.label} odometer`} className="w-6 h-6 rounded object-cover border border-border hover:border-amber-400 transition-colors" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground text-[10px] block">Ending KM</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono font-bold text-foreground text-sm">
-                    {trip.endingKm ? `${trip.endingKm} km` : "Pending"}
-                  </span>
-                  {trip.endKmPhoto && (
-                    <button
-                      type="button"
-                      onClick={() => openExternalUrl(trip.endKmPhoto)}
-                      title="View odometer photo"
-                      className="shrink-0 cursor-pointer"
-                    >
-                      <img src={trip.endKmPhoto} alt="Ending odometer" className="w-6 h-6 rounded object-cover border border-border hover:border-amber-400 transition-colors" />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground text-[10px] block">Actual KM Clocked</span>
-                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-sm">
-                  {trip.actualKm ? `${trip.actualKm} km` : "In Progress"}
-                </span>
-              </div>
+              ))}
             </div>
+
+            {/* Distance split: empty running at each end vs the billed trip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              {[
+                { label: "Stand → Pickup", km: trip.standToPickupKm, tone: "text-purple-700 dark:text-purple-400", note: "Empty running" },
+                { label: "Pickup → Drop", km: trip.actualKm, tone: "text-emerald-700 dark:text-emerald-400", note: "Trip KM (billed)" },
+                { label: "Drop → Stand", km: trip.dropToStandKm, tone: "text-purple-700 dark:text-purple-400", note: "Empty running" },
+                { label: "Stand → Stand", km: trip.standToStandKm, tone: "text-amber-700 dark:text-amber-400", note: "Total vehicle KM" },
+              ].map((leg) => (
+                <div key={leg.label} className="bg-background/60 p-3 rounded-lg border border-border">
+                  <span className="text-muted-foreground text-[10px] block">{leg.label}</span>
+                  <span className={`font-mono font-bold text-sm ${leg.tone}`}>
+                    {leg.km != null ? `${leg.km} km` : "-"}
+                  </span>
+                  <span className="text-muted-foreground text-[10px] block">{leg.note}</span>
+                </div>
+              ))}
+            </div>
+
+            {trip.status === "completed" && onOpenStandKmModal && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onOpenStandKmModal(trip)}
+                className="w-full h-9 text-xs border-purple-300 dark:border-purple-500/40 text-purple-700 dark:text-purple-300 hover:bg-purple-950/20 cursor-pointer"
+              >
+                <Gauge className="w-3.5 h-3.5 mr-1.5" />
+                {trip.standReturnKm != null ? "Correct Back-at-Stand KM" : "Record Back-at-Stand KM"}
+              </Button>
+            )}
           </div>
 
           {/* Ops Trip Lifecycle Control — same stage-by-stage progression the

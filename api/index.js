@@ -87433,6 +87433,13 @@ var tripsTable = pgTable(
     endKmLocation: text("end_km_location"),
     endKmPhoto: text("end_km_photo"),
     actualKm: numeric("actual_km", { precision: 12, scale: 2 }),
+    // Stand (garage) odometer: leaving for pickup, and back after the drop.
+    // Tracking only — billing uses startingKm/endingKm (pickup -> drop).
+    standStartKm: numeric("stand_start_km", { precision: 12, scale: 2 }),
+    standStartPhoto: text("stand_start_photo"),
+    standReturnKm: numeric("stand_return_km", { precision: 12, scale: 2 }),
+    standReturnPhoto: text("stand_return_photo"),
+    standReturnTime: timestamp("stand_return_time", { withTimezone: true }),
     expenseTotal: numeric("expense_total", { precision: 12, scale: 2 }).notNull().default("0"),
     cancellationReason: text("cancellation_reason"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
@@ -96294,6 +96301,33 @@ function resolveTollRateMode(isRoundTrip, startDate, startTime, returnDate, retu
   const hoursGap = (ret.getTime() - start.getTime()) / (1e3 * 60 * 60);
   return hoursGap >= 0 && hoursGap <= 24 ? "round_trip_same_day" : "round_trip_multi_day";
 }
+var LEG_CACHE_TTL_MS = 30 * 60 * 1e3;
+var LEG_CACHE_MAX = 300;
+var legCache = /* @__PURE__ */ new Map();
+function cachedDrivingLeg(...args) {
+  const [from, to, waypoints, options] = args;
+  const pt = (p) => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`;
+  const key = [
+    pt(from),
+    pt(to),
+    (waypoints || []).map(pt).join(";"),
+    options?.avoidTolls ? "notoll" : "",
+    options?.avoidHighways ? "nohwy" : ""
+  ].join("|");
+  const now = Date.now();
+  const hit = legCache.get(key);
+  if (hit && now - hit.at < LEG_CACHE_TTL_MS) return hit.leg;
+  const leg = calculateSingleDrivingLeg(...args);
+  legCache.set(key, { at: now, leg });
+  leg.catch(() => legCache.delete(key));
+  if (legCache.size > LEG_CACHE_MAX) {
+    for (const [k, v] of legCache) {
+      if (now - v.at >= LEG_CACHE_TTL_MS || legCache.size > LEG_CACHE_MAX) legCache.delete(k);
+      if (legCache.size <= LEG_CACHE_MAX) break;
+    }
+  }
+  return leg;
+}
 async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsParam = [], tripTypeParam = "single_trip", optionsParam = {}) {
   let pickup;
   let destination;
@@ -96347,25 +96381,26 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
   }
   const isRoundTrip = tripType.toLowerCase().includes("round");
   const waypoints = stops.filter((s) => s.latitude && s.longitude).map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
-  const outbound = await calculateSingleDrivingLeg(
-    { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
-    { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
-    waypoints,
-    options
-  );
-  let returnLeg;
+  const [outbound, returnLegResult] = await Promise.all([
+    cachedDrivingLeg(
+      { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
+      { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
+      waypoints,
+      options
+    ),
+    isRoundTrip ? cachedDrivingLeg(
+      { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
+      { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
+      [...waypoints].reverse(),
+      options
+    ) : Promise.resolve(void 0)
+  ]);
+  let returnLeg = returnLegResult;
   let totalRoadDistanceKm = outbound.distanceKm;
   let totalDurationMinutes = outbound.durationMinutes;
   let estimatedToll = outbound.estimatedToll;
   let tollAvailable = outbound.tollAvailable;
-  if (isRoundTrip) {
-    const returnWaypoints = [...waypoints].reverse();
-    returnLeg = await calculateSingleDrivingLeg(
-      { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
-      { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
-      returnWaypoints,
-      options
-    );
+  if (isRoundTrip && returnLeg) {
     totalRoadDistanceKm = Math.round((outbound.distanceKm + returnLeg.distanceKm) * 10) / 10;
     totalDurationMinutes = outbound.durationMinutes + returnLeg.durationMinutes;
     if (outbound.tollAvailable && returnLeg.tollAvailable) {
@@ -96390,21 +96425,23 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
   let tollFreeAlt = null;
   if (!options.avoidTolls && (estimatedToll || 0) > 0) {
     try {
-      const outboundNoToll = await calculateSingleDrivingLeg(
-        { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
-        { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
-        waypoints,
-        { ...options, avoidTolls: true }
-      );
-      let noTollTotalKm = outboundNoToll.distanceKm;
-      let noTollDurationMinutes = outboundNoToll.durationMinutes;
-      if (isRoundTrip) {
-        const returnNoToll = await calculateSingleDrivingLeg(
+      const [outboundNoToll, returnNoToll] = await Promise.all([
+        cachedDrivingLeg(
+          { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
+          { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
+          waypoints,
+          { ...options, avoidTolls: true }
+        ),
+        isRoundTrip ? cachedDrivingLeg(
           { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
           { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
           [...waypoints].reverse(),
           { ...options, avoidTolls: true }
-        );
+        ) : Promise.resolve(void 0)
+      ]);
+      let noTollTotalKm = outboundNoToll.distanceKm;
+      let noTollDurationMinutes = outboundNoToll.durationMinutes;
+      if (isRoundTrip && returnNoToll) {
         noTollTotalKm = Math.round((outboundNoToll.distanceKm + returnNoToll.distanceKm) * 10) / 10;
         noTollDurationMinutes = outboundNoToll.durationMinutes + returnNoToll.durationMinutes;
       }
@@ -96813,6 +96850,10 @@ var normalizeTripStatus = (value) => {
   const normalized = String(value ?? "").trim().toLowerCase().replaceAll(" ", "_");
   return normalized === "pending" ? "upcoming" : normalized;
 };
+var openTripsFor = async (condition) => {
+  const rows = await db.select({ bookingId: tripsTable.bookingId, status: tripsTable.status }).from(tripsTable).where(condition);
+  return rows.filter((t) => !["completed", "cancelled"].includes(normalizeTripStatus(t.status)));
+};
 var defaultSettings = {
   company: "NG Travels Operations",
   mobile: "+91 98450 21867",
@@ -96931,7 +96972,7 @@ function tripView(trip, customer) {
     returnDurationMinutes: trip.returnDurationMinutes ?? null,
     routeSummary: trip.routeSummary ?? null,
     selectedRouteSummary: trip.selectedRouteSummary ?? null,
-    routeOptions: trip.routeOptions ?? [],
+    routeOptions: withoutPolylines(trip.routeOptions),
     apiEstimatedToll: trip.apiEstimatedToll == null ? null : numeric2(trip.apiEstimatedToll),
     estimatedToll: trip.estimatedToll == null ? null : numeric2(trip.estimatedToll),
     finalToll: numeric2(trip.finalToll ?? trip.toll),
@@ -96961,12 +97002,37 @@ function tripView(trip, customer) {
     endKmLocation: trip.endKmLocation ?? null,
     endKmPhoto: trip.endKmPhoto ?? null,
     actualKm: trip.actualKm == null ? null : numeric2(trip.actualKm),
+    standStartKm: trip.standStartKm == null ? null : numeric2(trip.standStartKm),
+    standStartPhoto: trip.standStartPhoto ?? null,
+    standReturnKm: trip.standReturnKm == null ? null : numeric2(trip.standReturnKm),
+    standReturnPhoto: trip.standReturnPhoto ?? null,
+    standReturnTime: trip.standReturnTime ?? null,
+    ...standDistances(trip),
     expenseTotal: numeric2(trip.expenseTotal),
     cancellationReason: trip.cancellationReason ?? null,
     cancelledAt: trip.cancelledAt ?? null,
     isLocked: Boolean(trip.isLocked),
     createdAt: trip.createdAt instanceof Date ? trip.createdAt : new Date(trip.createdAt),
     updatedAt: trip.updatedAt ? trip.updatedAt instanceof Date ? trip.updatedAt : new Date(trip.updatedAt) : void 0
+  };
+}
+function withoutPolylines(routeOptions) {
+  if (!Array.isArray(routeOptions)) return [];
+  return routeOptions.map((opt) => {
+    if (!opt || typeof opt !== "object") return opt;
+    const { polylineCoordinates, coordinates, ...rest } = opt;
+    return rest;
+  });
+}
+function standDistances(trip) {
+  const km = (v) => v == null ? null : numeric2(v);
+  const diff = (to, from) => to != null && from != null ? Math.round((to - from) * 100) / 100 : null;
+  const standStart = km(trip.standStartKm);
+  const standReturn = km(trip.standReturnKm);
+  return {
+    standToPickupKm: diff(km(trip.startingKm), standStart),
+    dropToStandKm: diff(standReturn, km(trip.endingKm)),
+    standToStandKm: diff(standReturn, standStart)
   };
 }
 function checkDocumentExpiry(expiryDateStr) {
@@ -97030,7 +97096,7 @@ router2.post("/auth/driver-login", async (req, res) => {
   try {
     const allDrivers = await db.select().from(driversTable);
     const driver = allDrivers.find(
-      (d) => cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile) || cleanCode && d.driverCode.toUpperCase() === cleanCode
+      (d) => d.status !== "archived" && (cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile) || cleanCode && d.driverCode.toUpperCase() === cleanCode)
     );
     if (!driver || driver.status === "inactive") {
       res.status(401).json({
@@ -97105,7 +97171,7 @@ router2.post("/auth/driver-password-reset-request", async (req, res) => {
     const cleanCode = rawId.toUpperCase();
     const allDrivers = await db.select().from(driversTable);
     const driver = allDrivers.find(
-      (d) => cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile) || cleanCode && d.driverCode.toUpperCase() === cleanCode
+      (d) => d.status !== "archived" && (cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile) || cleanCode && d.driverCode.toUpperCase() === cleanCode)
     );
     if (driver) {
       const trimmedNote = String(note || "").trim();
@@ -97498,7 +97564,7 @@ router2.get("/dashboard", requireOwner, async (_req, res) => {
 });
 router2.get("/drivers", requireOwner, async (_req, res) => {
   try {
-    const rows = await db.select().from(driversTable).orderBy(asc(driversTable.name));
+    const rows = await db.select().from(driversTable).where(ne(driversTable.status, "archived")).orderBy(asc(driversTable.name));
     res.json(rows);
   } catch (err) {
     console.error("[drivers] Database query failed:", err?.message);
@@ -97580,6 +97646,35 @@ router2.patch("/drivers/:id", requireOwner, async (req, res) => {
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to update driver" } });
   }
 });
+router2.delete("/drivers/:id", requireOwner, async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const openTrips = await openTripsFor(eq(tripsTable.driverId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Driver is assigned to ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Reassign or close them first.`
+        }
+      });
+      return;
+    }
+    const [row] = await db.update(driversTable).set({ status: "archived", availability: "offline", updatedAt: /* @__PURE__ */ new Date() }).where(eq(driversTable.id, id)).returning();
+    if (!row) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Driver not found" } });
+      return;
+    }
+    await db.update(usersTable).set({ status: "inactive" }).where(eq(usersTable.driverId, id));
+    await db.update(vehiclesTable).set({ assignedDriverId: null }).where(eq(vehiclesTable.assignedDriverId, id));
+    await writeAudit(req, "Deleted driver", "driver", id, row, null);
+    broadcastRealtimeEvent("DRIVER_STATUS_CHANGED", row);
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error("[drivers] Delete error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to delete driver" } });
+  }
+});
 router2.patch("/drivers/:id/availability", async (req, res) => {
   const id = Number(req.params.id);
   const { availability } = req.body;
@@ -97598,7 +97693,7 @@ router2.patch("/drivers/:id/availability", async (req, res) => {
 });
 router2.get("/vehicles", async (_req, res) => {
   try {
-    const rows = await db.select().from(vehiclesTable).orderBy(asc(vehiclesTable.vehicleNumber));
+    const rows = await db.select().from(vehiclesTable).where(ne(vehiclesTable.status, "archived")).orderBy(asc(vehiclesTable.vehicleNumber));
     res.json(rows.map(enrichVehicleWithAlerts));
   } catch (err) {
     console.error("[vehicles] Database query failed:", err?.message);
@@ -97684,8 +97779,24 @@ router2.patch("/vehicles/:id", requireOwner, async (req, res) => {
 router2.delete("/vehicles/:id", requireOwner, async (req, res) => {
   const id = Number(req.params.id);
   try {
-    await db.update(vehiclesTable).set({ status: "inactive" }).where(eq(vehiclesTable.id, id));
-    await writeAudit(req, "Deactivated vehicle", "vehicle", id);
+    const openTrips = await openTripsFor(eq(tripsTable.vehicleId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Vehicle is assigned to ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Reassign or close them first.`
+        }
+      });
+      return;
+    }
+    const [row] = await db.update(vehiclesTable).set({ status: "archived", assignedDriverId: null, updatedAt: /* @__PURE__ */ new Date() }).where(eq(vehiclesTable.id, id)).returning();
+    if (!row) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Vehicle not found" } });
+      return;
+    }
+    await writeAudit(req, "Deleted vehicle", "vehicle", id, row, null);
+    broadcastRealtimeEvent("VEHICLE_UPDATED", row);
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: err.message } });
@@ -97768,6 +97879,17 @@ router2.patch("/customers/:id", requireOwner, async (req, res) => {
 router2.delete("/customers/:id", requireOwner, async (req, res) => {
   const id = Number(req.params.id);
   try {
+    const openTrips = await openTripsFor(eq(tripsTable.customerId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Customer has ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Complete or cancel them first.`
+        }
+      });
+      return;
+    }
     await db.update(customersTable).set({ archived: true, updatedAt: /* @__PURE__ */ new Date() }).where(eq(customersTable.id, id));
     await writeAudit(req, "Archived customer", "customer", id);
     res.json({ success: true, id });
@@ -97978,7 +98100,7 @@ router2.get("/trips", async (req, res) => {
         customerIdFilter ? eq(tripsTable.customerId, customerIdFilter) : void 0,
         statusFilter ? eq(tripsTable.status, statusFilter) : void 0
       )
-    ).orderBy(desc(tripsTable.startDate), desc(tripsTable.startTime));
+    ).orderBy(desc(tripsTable.createdAt), desc(tripsTable.id));
     const customers = await db.select().from(customersTable);
     const customerMap = new Map(customers.map((c) => [c.id, c]));
     const tripViews = trips.map(
@@ -97998,7 +98120,29 @@ router2.post("/trips", requireOwner, async (req, res) => {
   const returnDateStr = req.body.returnDate ? dateOnly(req.body.returnDate) : null;
   const policy = req.body.billingDayPolicy || "CALENDAR_DAYS";
   const tripType = req.body.tripType || "single_trip";
+  const idempotencyKey = typeof req.body.idempotencyKey === "string" && req.body.idempotencyKey.trim() ? req.body.idempotencyKey.trim() : null;
+  const findExistingBooking = async () => {
+    if (!idempotencyKey) return null;
+    const [existing] = await db.select().from(tripsTable).where(eq(tripsTable.idempotencyKey, idempotencyKey));
+    if (!existing) return null;
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, existing.customerId));
+    return tripView(existing, customer);
+  };
   try {
+    const alreadyCreated = await findExistingBooking();
+    if (alreadyCreated) {
+      res.status(200).json(alreadyCreated);
+      return;
+    }
+    const standKm = Number(req.body.standStartKm);
+    if (req.body.standStartKm == null || req.body.standStartKm === "" || !Number.isFinite(standKm) || standKm <= 0) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Odometer reading at the stand is required." } });
+      return;
+    }
+    if (!req.body.standStartPhoto) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Odometer photo at the stand is required." } });
+      return;
+    }
     let journey = null;
     try {
       if (req.body.pickup && req.body.destination) {
@@ -98118,7 +98262,7 @@ router2.post("/trips", requireOwner, async (req, res) => {
       driverMobile,
       vehicleId: req.body.vehicleId ? Number(req.body.vehicleId) : null,
       vehicleNumber,
-      idempotencyKey: req.body.idempotencyKey || null,
+      idempotencyKey,
       tripType,
       pickup: req.body.pickup,
       destination: req.body.destination,
@@ -98134,12 +98278,15 @@ router2.post("/trips", requireOwner, async (req, res) => {
       outboundMapKm: String(commercialFare.outboundDistanceKm),
       returnMapKm: String(commercialFare.returnDistanceKm),
       totalMapKm: String(commercialFare.totalRoadDistanceKm),
+      // Odometer when the vehicle leaves the stand, captured at booking.
+      standStartKm: req.body.standStartKm != null && req.body.standStartKm !== "" ? String(Number(req.body.standStartKm)) : null,
+      standStartPhoto: req.body.standStartPhoto || null,
       routeDurationMinutes: verifiedTotalMinutes,
       outboundDurationMinutes: verifiedOutboundMinutes,
       returnDurationMinutes: verifiedReturnMinutes,
       routeSummary: journey?.alternatives[0]?.summary || req.body.routeSummary || `${commercialFare.totalRoadDistanceKm} km`,
       selectedRouteSummary: journey?.alternatives[0]?.summary || req.body.selectedRouteSummary || null,
-      routeOptions: journey?.alternatives || req.body.routeOptions || [],
+      routeOptions: withoutPolylines(journey?.alternatives || req.body.routeOptions),
       routeSnapshot,
       apiEstimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
       estimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
@@ -98201,6 +98348,13 @@ router2.post("/trips", requireOwner, async (req, res) => {
     broadcastRealtimeEvent("TRIP_CREATED", view);
     res.status(201).json(view);
   } catch (err) {
+    if (err?.code === "23505" || err?.cause?.code === "23505") {
+      const existing = await findExistingBooking().catch(() => null);
+      if (existing) {
+        res.status(200).json(existing);
+        return;
+      }
+    }
     console.error("[trips] Create error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: err?.message || "Failed to persist trip to database" } });
   }
@@ -98378,6 +98532,18 @@ router2.get("/driver/current-trip", async (req, res) => {
         ])
       )
     ).orderBy(desc(tripsTable.updatedAt)).limit(1);
+    if (trips.length === 0 && driverId) {
+      const since = new Date(Date.now() - 48 * 60 * 60 * 1e3);
+      const awaitingStand = await db.select().from(tripsTable).where(
+        and(
+          eq(tripsTable.driverId, driverId),
+          eq(tripsTable.status, "completed"),
+          isNull(tripsTable.standReturnKm),
+          gte(tripsTable.updatedAt, since)
+        )
+      ).orderBy(desc(tripsTable.updatedAt)).limit(1);
+      trips.push(...awaitingStand);
+    }
     if (trips.length === 0) {
       res.json(null);
       return;
@@ -98460,6 +98626,17 @@ router2.post("/driver/trips/:id/start", async (req, res) => {
     return;
   }
   try {
+    const [existing] = await db.select({ standStartKm: tripsTable.standStartKm }).from(tripsTable).where(eq(tripsTable.id, id));
+    if (existing?.standStartKm != null && startKmNum < numeric2(existing.standStartKm)) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `Pickup KM (${startKmNum}) cannot be less than the KM when the vehicle left the stand (${numeric2(existing.standStartKm)}).`
+        }
+      });
+      return;
+    }
     const [trip] = await db.update(tripsTable).set({
       status: "started",
       startingKm: String(startKmNum),
@@ -98587,6 +98764,72 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
   } catch (err) {
     console.error("[driver/complete] Error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to complete trip" } });
+  }
+});
+router2.post("/trips/:id/stand-return", async (req, res) => {
+  const id = Number(req.params.id);
+  const { standReturnKm, photoUrl } = req.body;
+  const kmNum = Number(standReturnKm);
+  if (standReturnKm == null || standReturnKm === "" || !Number.isFinite(kmNum) || kmNum <= 0) {
+    res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Please enter a valid back-at-stand odometer reading." } });
+    return;
+  }
+  try {
+    const viewer = await viewerFor(req);
+    if (!viewer) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Please sign in again." } });
+      return;
+    }
+    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    if (!trip) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
+      return;
+    }
+    const isDriver = viewer.role === "driver";
+    if (isDriver && trip.driverId !== viewer.driverId) {
+      res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "This trip isn't assigned to you." } });
+      return;
+    }
+    if (isDriver && trip.standReturnKm != null) {
+      res.status(409).json({ success: false, error: { code: "ALREADY_RECORDED", message: "Back-at-stand KM is already recorded. Ask the office to correct it." } });
+      return;
+    }
+    if (trip.status !== "completed" || trip.endingKm == null) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Complete the trip (enter the drop KM) before recording the back-at-stand KM." } });
+      return;
+    }
+    if (kmNum < numeric2(trip.endingKm)) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: `Back-at-stand KM (${kmNum}) cannot be less than the drop KM (${numeric2(trip.endingKm)}).` }
+      });
+      return;
+    }
+    const [updated] = await db.update(tripsTable).set({
+      standReturnKm: String(kmNum),
+      standReturnPhoto: photoUrl || trip.standReturnPhoto || null,
+      standReturnTime: /* @__PURE__ */ new Date(),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(tripsTable.id, id)).returning();
+    if (trip.vehicleId) {
+      await db.update(vehiclesTable).set({ currentOdometerKm: String(kmNum), updatedAt: /* @__PURE__ */ new Date() }).where(eq(vehiclesTable.id, trip.vehicleId));
+    }
+    const { dropToStandKm } = standDistances(updated);
+    await db.insert(tripStatusHistoryTable).values({
+      tripId: id,
+      status: "completed",
+      odometerKm: String(kmNum),
+      note: `Vehicle back at stand: ${kmNum} KM (drop to stand ${dropToStandKm ?? "-"} KM)`,
+      changedBy: viewer.name || (isDriver ? trip.driverName || "Driver" : "Operations Admin")
+    });
+    await writeAudit(req, `Recorded back-at-stand KM ${kmNum} for ${trip.bookingId}`, "trip", id);
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, updated.customerId));
+    const view = tripView(updated, customer);
+    broadcastRealtimeEvent("TRIP_UPDATED", view);
+    res.json(view);
+  } catch (err) {
+    console.error("[trips/stand-return] Error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
   }
 });
 router2.post("/driver/trips/:id/location", async (req, res) => {
@@ -98959,10 +99202,10 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 9,
-  versionName: "1.3.1",
+  versionCode: 11,
+  versionName: "1.3.3",
   url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
-  releaseNotes: "Fixes the in-app APK download getting stuck at 100% by requesting the Android 13+ notification permission the download progress needs."
+  releaseNotes: "Fixes the Settings page APK download button, which could get stuck at 100% inside the app \u2014 it now hands off to Chrome to download and install."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
@@ -99041,8 +99284,8 @@ app.use(
   })
 );
 app.use((0, import_cors.default)({ credentials: true, origin: true }));
-app.use(import_express4.default.json());
-app.use(import_express4.default.urlencoded({ extended: true }));
+app.use(import_express4.default.json({ limit: "2mb" }));
+app.use(import_express4.default.urlencoded({ extended: true, limit: "2mb" }));
 app.use("/api", routes_default);
 app.use(routes_default);
 var app_default = app;

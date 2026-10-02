@@ -517,6 +517,44 @@ function resolveTollRateMode(
  *  - Calculates Return leg: Destination -> Pickup
  *  - Total distance = Outbound distance + Return distance (never simply * 2)
  */
+// Leg results are cached briefly: the Route Planner / trip popup compute a
+// route, then saving the trip recomputes the identical route server-side.
+// Each leg is an external routing call (several seconds for long routes),
+// so reusing them turns the save from ~12s+ into near-instant. Promises are
+// cached so concurrent identical requests share one call.
+const LEG_CACHE_TTL_MS = 30 * 60 * 1000;
+const LEG_CACHE_MAX = 300;
+const legCache = new Map<string, { at: number; leg: Promise<DrivingLegResult> }>();
+
+function cachedDrivingLeg(...args: Parameters<typeof calculateSingleDrivingLeg>): Promise<DrivingLegResult> {
+  const [from, to, waypoints, options] = args;
+  const pt = (p: { lat: number; lng: number }) => `${Number(p.lat).toFixed(5)},${Number(p.lng).toFixed(5)}`;
+  const key = [
+    pt(from),
+    pt(to),
+    (waypoints || []).map(pt).join(";"),
+    options?.avoidTolls ? "notoll" : "",
+    options?.avoidHighways ? "nohwy" : "",
+  ].join("|");
+
+  const now = Date.now();
+  const hit = legCache.get(key);
+  if (hit && now - hit.at < LEG_CACHE_TTL_MS) return hit.leg;
+
+  const leg = calculateSingleDrivingLeg(...args);
+  legCache.set(key, { at: now, leg });
+  // Never cache a failure — the next request should retry the provider
+  leg.catch(() => legCache.delete(key));
+
+  if (legCache.size > LEG_CACHE_MAX) {
+    for (const [k, v] of legCache) {
+      if (now - v.at >= LEG_CACHE_TTL_MS || legCache.size > LEG_CACHE_MAX) legCache.delete(k);
+      if (legCache.size <= LEG_CACHE_MAX) break;
+    }
+  }
+  return leg;
+}
+
 export async function calculateRouteJourney(
   pickupOrOptions: TripLocation | {
     pickup: TripLocation;
@@ -596,29 +634,33 @@ export async function calculateRouteJourney(
     .filter((s) => s.latitude && s.longitude)
     .map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
 
-  // 1. Calculate Outbound Leg: Pickup -> Destination
-  const outbound = await calculateSingleDrivingLeg(
-    { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-    { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-    waypoints,
-    options,
-  );
+  // 1. Outbound Leg (Pickup -> Destination) and, for a round trip, the
+  // independent Return Leg (Destination -> Pickup) — fetched in parallel.
+  const [outbound, returnLegResult] = await Promise.all([
+    cachedDrivingLeg(
+      { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
+      { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
+      waypoints,
+      options,
+    ),
+    isRoundTrip
+      ? cachedDrivingLeg(
+          { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
+          { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
+          [...waypoints].reverse(),
+          options,
+        )
+      : Promise.resolve(undefined),
+  ]);
 
-  let returnLeg: DrivingLegResult | undefined;
+  let returnLeg: DrivingLegResult | undefined = returnLegResult;
   let totalRoadDistanceKm = outbound.distanceKm;
   let totalDurationMinutes = outbound.durationMinutes;
   let estimatedToll = outbound.estimatedToll;
   let tollAvailable = outbound.tollAvailable;
 
-  // 2. For Round-Trip: Calculate Independent Return Leg (Destination -> Pickup)
-  if (isRoundTrip) {
-    const returnWaypoints = [...waypoints].reverse();
-    returnLeg = await calculateSingleDrivingLeg(
-      { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-      { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-      returnWaypoints,
-      options,
-    );
+  // 2. For Round-Trip: combine with the Return Leg
+  if (isRoundTrip && returnLeg) {
 
     // Sum of actual Outbound + actual Return
     totalRoadDistanceKm = Math.round((outbound.distanceKm + returnLeg.distanceKm) * 10) / 10;
@@ -658,22 +700,26 @@ export async function calculateRouteJourney(
   let tollFreeAlt: RouteAlternative | null = null;
   if (!options.avoidTolls && (estimatedToll || 0) > 0) {
     try {
-      const outboundNoToll = await calculateSingleDrivingLeg(
-        { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-        { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-        waypoints,
-        { ...options, avoidTolls: true },
-      );
+      const [outboundNoToll, returnNoToll] = await Promise.all([
+        cachedDrivingLeg(
+          { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
+          { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
+          waypoints,
+          { ...options, avoidTolls: true },
+        ),
+        isRoundTrip
+          ? cachedDrivingLeg(
+              { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
+              { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
+              [...waypoints].reverse(),
+              { ...options, avoidTolls: true },
+            )
+          : Promise.resolve(undefined),
+      ]);
 
       let noTollTotalKm = outboundNoToll.distanceKm;
       let noTollDurationMinutes = outboundNoToll.durationMinutes;
-      if (isRoundTrip) {
-        const returnNoToll = await calculateSingleDrivingLeg(
-          { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-          { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-          [...waypoints].reverse(),
-          { ...options, avoidTolls: true },
-        );
+      if (isRoundTrip && returnNoToll) {
         noTollTotalKm = Math.round((outboundNoToll.distanceKm + returnNoToll.distanceKm) * 10) / 10;
         noTollDurationMinutes = outboundNoToll.durationMinutes + returnNoToll.durationMinutes;
       }

@@ -18,7 +18,7 @@ import {
 import {
   User, Calendar, Navigation, IndianRupee, ShieldCheck, CheckCircle2,
   Plus, Trash2, ArrowRight, ArrowLeft, Sparkles, AlertTriangle,
-  Clock, Car, Search, Calculator, Receipt, CreditCard, MapPin
+  Clock, Car, Search, Calculator, Receipt, CreditCard, MapPin, Gauge, Camera, X
 } from "lucide-react";
 import { TripActionLoader, ButtonLoader } from "@/components/loading";
 
@@ -36,6 +36,32 @@ export interface CreateTripModalProps {
   // hasn't started yet — the caller is responsible for that check.
   editingTrip?: any;
 }
+
+// Normalises a stored/handed-over location (trip row, route planner, or a
+// plain enquiry string) into the shape the pickers and map expect.
+const toPickerLocation = (loc: any) => {
+  if (!loc) return null;
+  if (typeof loc === "string") return { name: loc, address: loc };
+  const lat = loc.latitude ?? loc.lat;
+  const lng = loc.longitude ?? loc.lng;
+  return {
+    name: loc.name,
+    address: loc.address,
+    formattedAddress: loc.formattedAddress || loc.address,
+    latitude: lat,
+    longitude: lng,
+    lat,
+    lng,
+    placeId: loc.placeId,
+  };
+};
+
+const locationText = (loc: any) =>
+  typeof loc === "string" ? loc : loc?.address || loc?.name || "";
+
+// Same limits the /driver/trips/upload-km-photo endpoint enforces
+const MAX_ODOMETER_PHOTO_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_ODOMETER_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 
 const WIZARD_STEPS = [
   "Customer",
@@ -59,6 +85,11 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   const isEditing = Boolean(editingTrip);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  // Blocks a second submit before the `loading` state re-render lands
+  const submittingRef = React.useRef(false);
+  // One key per booking attempt: the server returns the already-created
+  // trip for a repeated key instead of creating a duplicate.
+  const idempotencyKeyRef = React.useRef("");
 
   // Step 1: Customer (Clean initial state - zero autofill)
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
@@ -112,6 +143,44 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   // toll-free alternative has none, so this isn't re-fetched per option,
   // just hidden when that option is selected (see `displayedTollPlazas`).
   const [primaryTollPlazas, setPrimaryTollPlazas] = useState<any[]>([]);
+
+  // Vehicle odometer when it leaves the stand (+ photo proof). Kept apart
+  // from the driver's pickup reading so stand -> pickup KM can be tracked.
+  const [odometerKm, setOdometerKm] = useState("");
+  const [odometerPhotoFile, setOdometerPhotoFile] = useState<File | null>(null);
+  const [odometerPhotoPreview, setOdometerPhotoPreview] = useState<string | null>(null);
+  const [odometerPhotoUrl, setOdometerPhotoUrl] = useState<string | null>(null);
+  const odometerFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const clearOdometerPhotoFile = () => {
+    setOdometerPhotoFile(null);
+    setOdometerPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const handlePickOdometerPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same photo after removing it
+    if (!file) return;
+    if (!ACCEPTED_ODOMETER_PHOTO_TYPES.includes(file.type)) {
+      alert("Unsupported photo format — please use a JPG, PNG, WEBP or HEIC image.");
+      return;
+    }
+    if (file.size > MAX_ODOMETER_PHOTO_BYTES) {
+      alert("That photo is too large — it must be under 8MB.");
+      return;
+    }
+    clearOdometerPhotoFile();
+    setOdometerPhotoFile(file);
+    setOdometerPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const handleRemoveOdometerPhoto = () => {
+    clearOdometerPhotoFile();
+    setOdometerPhotoUrl(null);
+  };
 
   // Step 4: Commercial Pricing Parameters
   const [pricingMode, setPricingMode] = useState<"per_km" | "package">("per_km");
@@ -278,25 +347,54 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
     setReturnDurationMinutes(0);
   };
 
-  // Sync enquiry data if provided
-  useEffect(() => {
-    if (initialEnquiry) {
-      setNewCustomerName(initialEnquiry.customerName || "");
-      setNewCustomerMobile(initialEnquiry.customerMobile || "");
+  // Pre-fill a new booking from an enquiry being converted, or from a route
+  // calculated in the Route Planner (which also hands over its distances,
+  // toll, durations, polylines and route options so the wizard shows exactly
+  // what the planner showed instead of starting from zero).
+  const applyPrefill = (p: any) => {
+    if (p.customerName || p.customerMobile) {
+      setNewCustomerName(p.customerName || "");
+      setNewCustomerMobile(p.customerMobile || "");
       setIsCreatingNewCustomer(true);
-      if (initialEnquiry.pickup) {
-        setPickupInput(initialEnquiry.pickup);
-        setPickupLocation({ name: initialEnquiry.pickup, address: initialEnquiry.pickup });
-      }
-      if (initialEnquiry.destination) {
-        setDestInput(initialEnquiry.destination);
-        setDestLocation({ name: initialEnquiry.destination, address: initialEnquiry.destination });
-      }
-      if (initialEnquiry.tripType) setTripType(initialEnquiry.tripType);
-      if (initialEnquiry.startDate) setStartDate(initialEnquiry.startDate);
-      if (initialEnquiry.passengerCount) setPassengerCount(initialEnquiry.passengerCount);
     }
-  }, [initialEnquiry]);
+    if (p.pickup) {
+      setPickupInput(locationText(p.pickup));
+      setPickupLocation(toPickerLocation(p.pickup));
+    }
+    if (p.destination) {
+      setDestInput(locationText(p.destination));
+      setDestLocation(toPickerLocation(p.destination));
+    }
+    if (Array.isArray(p.stops)) {
+      setStops(p.stops.map(toPickerLocation).filter(Boolean));
+    }
+    if (p.tripType) setTripType(p.tripType);
+    if (p.startDate) setStartDate(p.startDate);
+    if (p.passengerCount) setPassengerCount(Number(p.passengerCount));
+
+    const totalKm = Math.round(Number(p.totalMapKm || p.billingKm || 0));
+    if (totalKm > 0) {
+      setDistanceKm(totalKm);
+      setOutboundKm(Math.round(Number(p.outboundMapKm || 0)));
+      setReturnKm(Math.round(Number(p.returnMapKm || 0)));
+    }
+    if (p.estimatedToll != null) {
+      setFinalToll(Number(p.estimatedToll || 0));
+      setEstimatedToll(Number(p.estimatedToll || 0));
+    }
+    if (p.outboundDurationMinutes != null) setOutboundDurationMinutes(Number(p.outboundDurationMinutes || 0));
+    if (p.returnDurationMinutes != null) setReturnDurationMinutes(Number(p.returnDurationMinutes || 0));
+    if (Array.isArray(p.routeCoordinates)) setRouteCoordinates(p.routeCoordinates);
+    if (Array.isArray(p.outboundCoordinates)) setOutboundCoordinates(p.outboundCoordinates);
+    if (Array.isArray(p.returnCoordinates)) setReturnCoordinates(p.returnCoordinates);
+    if (p.tollStatus) setTollStatus(p.tollStatus);
+    if (p.tollRateMode) setTollRateMode(p.tollRateMode);
+    if (Array.isArray(p.tollPlazas)) setPrimaryTollPlazas(p.tollPlazas);
+    if (Array.isArray(p.routes)) {
+      setRouteOptions(p.routes);
+      setSelectedRouteIdx(Math.min(Math.max(Number(p.selectedRouteIdx || 0), 0), Math.max(p.routes.length - 1, 0)));
+    }
+  };
 
   // Populate the wizard from an existing trip when editing, or reset it to a
   // blank slate for a brand-new booking — the modal stays mounted between
@@ -306,22 +404,11 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     setStep(1);
+    idempotencyKeyRef.current = `trip-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     if (editingTrip) {
       const toDateStr = (d: any) => (d ? new Date(d).toISOString().slice(0, 10) : "");
-      const toLocation = (loc: any) =>
-        loc
-          ? {
-              name: loc.name,
-              address: loc.address,
-              formattedAddress: loc.address,
-              latitude: loc.latitude,
-              longitude: loc.longitude,
-              lat: loc.latitude,
-              lng: loc.longitude,
-              placeId: loc.placeId,
-            }
-          : null;
+      const toLocation = toPickerLocation;
 
       setSelectedCustomerId(editingTrip.customerId ?? null);
       setIsCreatingNewCustomer(false);
@@ -367,6 +454,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
 
       setSelectedDriverId(editingTrip.driverId ?? null);
       setSelectedVehicleId(editingTrip.vehicleId ?? null);
+      setOdometerKm(editingTrip.standStartKm != null ? String(editingTrip.standStartKm) : "");
+      setOdometerPhotoUrl(editingTrip.standStartPhoto || null);
+      clearOdometerPhotoFile();
       // Advance/payment collection is handled by the dedicated Record Payment
       // flow, not re-run here — editing a trip must never silently log a
       // second advance payment.
@@ -429,9 +519,16 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
       setAdvanceAmount(0);
       setPaymentMethod("UPI");
       setPaymentReference("");
+
+      setOdometerKm("");
+      setOdometerPhotoUrl(null);
+      clearOdometerPhotoFile();
+
+      // Applied after the reset above so it isn't wiped by it.
+      if (initialEnquiry) applyPrefill(initialEnquiry);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, editingTrip]);
+  }, [isOpen, editingTrip, initialEnquiry]);
 
   // Waypoint search: live autocomplete for the "Add Stop" field, same
   // endpoint the Pickup/Destination pickers use — previously this field
@@ -538,6 +635,30 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
         alert("Please specify both pickup and destination locations");
         return;
       }
+      // Stand odometer + photo are mandatory for new bookings. Edits of
+      // trips booked before this was required stay optional, so they can
+      // still be changed without one.
+      const hasOdometerPhoto = Boolean(odometerPhotoFile || odometerPhotoUrl);
+      if (!isEditing && odometerKm.trim() === "") {
+        alert("Please enter the odometer reading at the stand");
+        return;
+      }
+      if (odometerKm.trim() !== "" && (!Number.isFinite(Number(odometerKm)) || Number(odometerKm) <= 0)) {
+        alert("Odometer reading must be a valid positive number");
+        return;
+      }
+      if (!isEditing && !hasOdometerPhoto) {
+        alert("Please upload a photo of the odometer reading");
+        return;
+      }
+      if (hasOdometerPhoto && odometerKm.trim() === "") {
+        alert("Please enter the odometer reading shown in the photo");
+        return;
+      }
+      if (odometerKm.trim() !== "" && !hasOdometerPhoto) {
+        alert("Please upload a photo of the odometer reading");
+        return;
+      }
       if (distanceKm <= 0) {
         const proceed = confirm("Road Distance is currently 0 KM. Would you like to enter a distance in KM now?");
         if (proceed) return;
@@ -595,6 +716,8 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   };
 
   const handleSubmitBooking = async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     try {
       let customerId = selectedCustomerId;
@@ -611,7 +734,14 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           }),
         });
         const newCust = await custRes.json();
+        if (!custRes.ok || !newCust?.id) {
+          throw new Error(newCust?.error?.message || "Failed to create customer");
+        }
         customerId = newCust.id;
+        // If the trip save below fails, a retry reuses this customer
+        // instead of registering them a second time.
+        setSelectedCustomerId(newCust.id);
+        setIsCreatingNewCustomer(false);
       }
 
       if (!customerId) {
@@ -619,6 +749,30 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
         setLoading(false);
         return;
       }
+
+      let standStartPhoto = odometerPhotoUrl;
+      if (odometerPhotoFile) {
+        const formData = new FormData();
+        formData.append("file", odometerPhotoFile);
+        const uploadRes = await apiFetch("/api/driver/trips/upload-km-photo", {
+          method: "POST",
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => null);
+          throw new Error(errData?.error?.message || "Failed to upload the odometer photo.");
+        }
+        standStartPhoto = (await uploadRes.json()).url;
+        // Keep the uploaded URL so a retry after a failed save doesn't re-upload
+        setOdometerPhotoUrl(standStartPhoto);
+        clearOdometerPhotoFile();
+      }
+      const standStartKm = odometerKm.trim() !== "" ? Number(odometerKm) : null;
+
+      // Route choices without their map polylines: nothing reads the
+      // polylines back from a saved trip, and two long routes' worth of
+      // coordinates pushed the request past the server's body-size limit.
+      const routeOptionsSummary = routeOptions.map(({ polylineCoordinates, ...opt }: any) => opt);
 
       let res: Response;
 
@@ -652,7 +806,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           returnDurationMinutes,
           routeSummary: `${pickupInput} ➔ ${destInput}`,
           selectedRouteSummary: routeOptions[selectedRouteIdx]?.summary || `${pickupInput} ➔ ${destInput}`,
-          routeOptions,
+          routeOptions: routeOptionsSummary,
           apiEstimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
           estimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
           billingKm: String(commercialFare.totalBillableDistance),
@@ -680,6 +834,8 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           driverMobile: selectedDriver?.mobile || null,
           vehicleId: selectedVehicleId,
           vehicleNumber: selectedVehicle?.vehicleNumber || null,
+          standStartKm: standStartKm != null ? String(standStartKm) : null,
+          standStartPhoto: standStartPhoto || null,
           status: selectedDriverId ? "assigned" : "upcoming",
         };
 
@@ -710,7 +866,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           returnDurationMinutes,
           routeSummary: `${pickupInput} ➔ ${destInput}`,
           selectedRouteSummary: routeOptions[selectedRouteIdx]?.summary || `${pickupInput} ➔ ${destInput}`,
-          routeOptions,
+          routeOptions: routeOptionsSummary,
           estimatedToll: finalToll,
           billingKm: commercialFare.totalBillableDistance,
           ratePerKm,
@@ -730,9 +886,12 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           taxPercent,
           driverId: selectedDriverId,
           vehicleId: selectedVehicleId,
+          standStartKm,
+          standStartPhoto,
           advance: advanceAmount,
           paymentMethod,
           paymentReference,
+          idempotencyKey: idempotencyKeyRef.current,
         };
 
         res = await apiFetch("/api/trips", {
@@ -744,7 +903,13 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error?.message || errJson.error || `Failed to ${isEditing ? "update" : "create"} trip`);
+        const message =
+          errJson.error?.message ||
+          (typeof errJson.error === "string" ? errJson.error : null) ||
+          errJson.message;
+        // Non-JSON failures (body too large, proxy/server down) still say
+        // which HTTP status came back instead of a bare generic message.
+        throw new Error(message || `Failed to ${isEditing ? "update" : "create"} trip (HTTP ${res.status})`);
       }
 
       const savedTrip = await res.json();
@@ -756,6 +921,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
     } catch (err: any) {
       alert(err.message || `Failed to ${isEditing ? "update" : "create"} trip`);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -1337,6 +1503,84 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                       />
                     </div>
                   </div>
+
+                  {/* Odometer when leaving the stand + Photo */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-amber-300/60 dark:border-amber-500/20">
+                    <div>
+                      <label className="text-[11px] text-foreground mb-1 flex items-center gap-1">
+                        <Gauge className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" /> Odometer at Stand (KM){!isEditing && " *"}
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        inputMode="decimal"
+                        value={odometerKm}
+                        onChange={(e) => setOdometerKm(e.target.value)}
+                        placeholder="e.g. 45120"
+                        className="bg-card border-border text-sm h-10 font-mono font-bold text-foreground placeholder:text-muted-foreground"
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Meter when leaving the stand. Used to track stand → pickup KM (not billed).
+                      </p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] text-foreground mb-1 flex items-center gap-1">
+                        <Camera className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" /> Stand Odometer Photo{!isEditing && " *"}
+                      </label>
+                      <input
+                        ref={odometerFileInputRef}
+                        type="file"
+                        accept={ACCEPTED_ODOMETER_PHOTO_TYPES.join(",")}
+                        onChange={handlePickOdometerPhoto}
+                        className="hidden"
+                      />
+                      {odometerPhotoPreview || odometerPhotoUrl ? (
+                        <div className="flex items-center gap-3">
+                          <a
+                            href={odometerPhotoPreview || odometerPhotoUrl || undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block shrink-0"
+                          >
+                            <img
+                              src={odometerPhotoPreview || odometerPhotoUrl || undefined}
+                              alt="Odometer"
+                              className="h-16 w-24 object-cover rounded-lg border border-border"
+                            />
+                          </a>
+                          <div className="flex flex-col gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => odometerFileInputRef.current?.click()}
+                              className="h-7 text-[11px] border-border cursor-pointer"
+                            >
+                              <Camera className="w-3 h-3 mr-1" /> Replace
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={handleRemoveOdometerPhoto}
+                              className="h-7 text-[11px] text-rose-700 dark:text-rose-400 cursor-pointer"
+                            >
+                              <X className="w-3 h-3 mr-1" /> Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => odometerFileInputRef.current?.click()}
+                          className="w-full h-10 border-dashed border-amber-300 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 text-xs cursor-pointer hover:bg-amber-100 hover:dark:bg-amber-400/10"
+                        >
+                          <Camera className="w-3.5 h-3.5 mr-1.5" /> Capture / Upload Odometer Photo
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1714,6 +1958,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
               <Button
                 size="sm"
                 onClick={handleSubmitBooking}
+                disabled={loading}
                 className="bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-black text-xs h-9 px-5 cursor-pointer shadow-lg shadow-emerald-400/20"
               >
                 <CheckCircle2 className="w-4 h-4 mr-1.5" /> {isEditing ? "SAVE CHANGES" : "DISPATCH TRIP"}

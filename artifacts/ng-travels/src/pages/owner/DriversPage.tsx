@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiFetch } from "@/lib/apiFetch";
 import {
   Car,
@@ -12,9 +14,11 @@ import {
   Plus,
   Key,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NGTravelsLoader } from "@/components/loading";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 import {
   DriverManagementModal,
   CreateDriverData,
@@ -34,6 +38,31 @@ export const DriversPage: React.FC<DriversPageProps> = ({
   const [isManagementModalOpen, setIsManagementModalOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<{ id: number; availability: string } | null>(null);
+  const [deletingDriver, setDeletingDriver] = useState<any | null>(null);
+  const queryClient = useQueryClient();
+
+  // Server archives the driver (and disables their login) so past trips,
+  // expenses and payouts keep pointing at a real record.
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiFetch(`/api/drivers/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || "Failed to delete driver");
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/drivers"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/vehicles"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] }),
+      ]);
+      toast.success("Driver deleted");
+      setDeletingDriver(null);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
 
   const handleAvailabilityClick = async (driverId: number, availability: string) => {
     if (!onUpdateAvailability || pendingUpdate) return;
@@ -170,6 +199,7 @@ export const DriversPage: React.FC<DriversPageProps> = ({
                   </div>
                 </div>
 
+                <div className="flex items-center gap-1.5">
                 <span
                   className={`text-[10px] font-bold px-2 py-0.5 rounded capitalize ${
                     drv.availability === "available"
@@ -183,6 +213,14 @@ export const DriversPage: React.FC<DriversPageProps> = ({
                 >
                   {drv.availability?.replaceAll("_", " ")}
                 </span>
+                <button
+                  onClick={() => setDeletingDriver(drv)}
+                  className="p-1.5 rounded-lg bg-muted/80 hover:bg-rose-100 hover:dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors cursor-pointer"
+                  title="Delete driver"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+                </div>
               </div>
 
               <div className="space-y-1.5 text-xs text-muted-foreground bg-background/60 p-3 rounded-lg border border-border/80">
@@ -262,6 +300,21 @@ export const DriversPage: React.FC<DriversPageProps> = ({
           ))}
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        isOpen={Boolean(deletingDriver)}
+        title="Delete Driver"
+        description={
+          <>
+            Remove <strong className="text-foreground">{deletingDriver?.name}</strong> ({deletingDriver?.driverCode}) from the roster?
+            Their driver app login will be disabled and any vehicle assignment cleared. Past trips and expenses are kept.
+            Drivers on open trips can't be deleted until those trips are reassigned or closed.
+          </>
+        }
+        loading={deleteMutation.isPending}
+        onConfirm={() => deletingDriver && deleteMutation.mutate(deletingDriver.id)}
+        onClose={() => setDeletingDriver(null)}
+      />
     </div>
   );
 };

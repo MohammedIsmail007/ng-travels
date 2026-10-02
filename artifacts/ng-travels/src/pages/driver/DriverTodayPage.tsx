@@ -9,6 +9,7 @@ interface DriverTodayPageProps {
   isLoading?: boolean;
   onOpenStartKmModal: (trip: any) => void;
   onOpenEndKmModal: (trip: any) => void;
+  onOpenStandKmModal?: (trip: any) => void;
 }
 
 export const DriverTodayPage: React.FC<DriverTodayPageProps> = ({
@@ -16,6 +17,7 @@ export const DriverTodayPage: React.FC<DriverTodayPageProps> = ({
   isLoading = false,
   onOpenStartKmModal,
   onOpenEndKmModal,
+  onOpenStandKmModal,
 }) => {
   return (
     <div className="space-y-4">
@@ -64,10 +66,17 @@ export const DriverTodayPage: React.FC<DriverTodayPageProps> = ({
               <div className="bg-background/60 p-3 rounded-xl border border-border/80 text-xs space-y-1">
                 <div className="text-foreground">Passenger: <strong>{trip.customerName || "Corporate Passenger"}</strong> ({trip.customerMobile || "-"})</div>
                 <div className="text-muted-foreground text-[11px]">Departure Time: {trip.startTime} • {trip.billingKm} km</div>
-                {trip.startingKm && (
-                  <div className="text-muted-foreground text-[11px] pt-1 border-t border-border flex justify-between">
+                {(trip.standStartKm != null || trip.startingKm) && (
+                  <div className="text-muted-foreground text-[11px] pt-1 border-t border-border flex justify-between gap-2">
                     <span>Odometer:</span>
-                    <span className="font-mono text-foreground">{trip.startingKm} km {trip.endingKm ? `➔ ${trip.endingKm} km` : ""}</span>
+                    <span className="font-mono text-foreground text-right">
+                      {[
+                        trip.standStartKm != null && `Stand ${trip.standStartKm}`,
+                        trip.startingKm && `Pickup ${trip.startingKm}`,
+                        trip.endingKm && `Drop ${trip.endingKm}`,
+                        trip.standReturnKm != null && `Stand ${trip.standReturnKm}`,
+                      ].filter(Boolean).join(" ➔ ")}
+                    </span>
                   </div>
                 )}
               </div>
@@ -94,6 +103,14 @@ export const DriverTodayPage: React.FC<DriverTodayPageProps> = ({
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-9"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Complete (KM)
+                  </Button>
+                ) : trip.standReturnKm == null && onOpenStandKmModal ? (
+                  <Button
+                    size="sm"
+                    onClick={() => onOpenStandKmModal(trip)}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs h-9"
+                  >
+                    <Gauge className="w-3.5 h-3.5 mr-1" /> Back at Stand (KM)
                   </Button>
                 ) : (
                   <span className="text-emerald-700 dark:text-emerald-400 text-xs font-bold flex items-center gap-1">

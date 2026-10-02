@@ -481,7 +481,11 @@ export const RealtimeFleetMap: React.FC<RealtimeFleetMapProps> = ({
     };
 
     pollLiveGps();
-    timer = setInterval(pollLiveGps, 3000);
+    // Matches the driver app's 15s upload cadence — polling faster just
+    // re-reads the same position. Paused while the tab is hidden.
+    timer = setInterval(() => {
+      if (document.visibilityState === "visible") pollLiveGps();
+    }, 15000);
     return () => {
       if (timer) clearInterval(timer);
     };

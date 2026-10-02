@@ -15,14 +15,19 @@ interface DriverCurrentTripPageProps {
   trip: any;
   onOpenStartKmModal: (trip: any) => void;
   onOpenEndKmModal: (trip: any) => void;
+  onOpenStandKmModal?: (trip: any) => void;
   onOpenExpenseModal: (tripId: number) => void;
   onUpdateMilestone: (tripId: number, status: string, note?: string) => Promise<void>;
 }
+
+// Minimum gap between live-location uploads to the server
+const GPS_UPLOAD_INTERVAL_MS = 15_000;
 
 export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
   trip,
   onOpenStartKmModal,
   onOpenEndKmModal,
+  onOpenStandKmModal,
   onOpenExpenseModal,
   onUpdateMilestone,
 }) => {
@@ -49,6 +54,10 @@ export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
     const dLat = trip.destination?.latitude || 11.0168;
     const dLng = trip.destination?.longitude || 76.9558;
 
+    // The device reports a fix every 1-2s while moving. The HUD updates on
+    // every fix, but the server only gets one every GPS_UPLOAD_INTERVAL_MS —
+    // each upload is a DB write plus a broadcast to every connected client.
+    let lastUploadAt = 0;
     const pushLocation = async (lat: number, lng: number, speed: number, heading: number, accuracy: number) => {
       setGpsTelemetry({
         lat,
@@ -58,6 +67,10 @@ export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
         accuracy: Math.round(accuracy),
         lastSynced: new Date(),
       });
+
+      const now = Date.now();
+      if (now - lastUploadAt < GPS_UPLOAD_INTERVAL_MS) return;
+      lastUploadAt = now;
 
       try {
         await apiFetch(`/api/driver/trips/${trip.id}/location`, {
@@ -282,6 +295,16 @@ export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
             </div>
           )}
 
+          {/* Stage 7: Back at Stand KM (empty running after the drop) */}
+          {status === "completed" && trip.standReturnKm == null && onOpenStandKmModal && (
+            <Button
+              onClick={() => onOpenStandKmModal(trip)}
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-6 text-sm cursor-pointer shadow-lg shadow-purple-600/20 uppercase tracking-wide"
+            >
+              <Gauge className="w-5 h-5 mr-2" /> 7. Back at Stand (Enter Stand KM)
+            </Button>
+          )}
+
           {milestoneError && (
             <div className="bg-rose-950/40 border border-rose-300 dark:border-rose-500/40 rounded-xl p-3 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -291,19 +314,39 @@ export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
         </div>
       </div>
 
-      {/* Odometer KM Summary */}
-      <div className="bg-card/60 p-4 rounded-2xl border border-border text-xs grid grid-cols-3 gap-2 text-center">
-        <div>
-          <span className="text-muted-foreground text-[10px] block">Start KM</span>
-          <span className="font-mono font-bold text-foreground">{trip.startingKm ? `${trip.startingKm} km` : "-"}</span>
+      {/* Odometer KM Summary: stand → pickup → drop → stand */}
+      <div className="bg-card/60 p-4 rounded-2xl border border-border text-xs space-y-3">
+        <div className="grid grid-cols-4 gap-2 text-center">
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Stand Out</span>
+            <span className="font-mono font-bold text-foreground">{trip.standStartKm != null ? trip.standStartKm : "-"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Pickup</span>
+            <span className="font-mono font-bold text-foreground">{trip.startingKm ? trip.startingKm : "-"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Drop</span>
+            <span className="font-mono font-bold text-foreground">{trip.endingKm ? trip.endingKm : "-"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Stand In</span>
+            <span className="font-mono font-bold text-foreground">{trip.standReturnKm != null ? trip.standReturnKm : "-"}</span>
+          </div>
         </div>
-        <div>
-          <span className="text-muted-foreground text-[10px] block">End KM</span>
-          <span className="font-mono font-bold text-foreground">{trip.endingKm ? `${trip.endingKm} km` : "-"}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground text-[10px] block">Actual KM</span>
-          <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{trip.actualKm ? `${trip.actualKm} km` : "In run"}</span>
+        <div className="grid grid-cols-3 gap-2 text-center pt-2 border-t border-border">
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Stand → Pickup</span>
+            <span className="font-mono font-bold text-purple-700 dark:text-purple-400">{trip.standToPickupKm != null ? `${trip.standToPickupKm} km` : "-"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Trip KM</span>
+            <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">{trip.actualKm ? `${trip.actualKm} km` : "In run"}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground text-[10px] block">Drop → Stand</span>
+            <span className="font-mono font-bold text-purple-700 dark:text-purple-400">{trip.dropToStandKm != null ? `${trip.dropToStandKm} km` : "-"}</span>
+          </div>
         </div>
       </div>
     </div>

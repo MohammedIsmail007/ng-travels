@@ -356,6 +356,13 @@ export const tripsTable = pgTable(
     endKmLocation: text("end_km_location"),
     endKmPhoto: text("end_km_photo"),
     actualKm: numeric("actual_km", { precision: 12, scale: 2 }),
+    // Stand (garage) odometer: leaving for pickup, and back after the drop.
+    // Tracking only — billing uses startingKm/endingKm (pickup -> drop).
+    standStartKm: numeric("stand_start_km", { precision: 12, scale: 2 }),
+    standStartPhoto: text("stand_start_photo"),
+    standReturnKm: numeric("stand_return_km", { precision: 12, scale: 2 }),
+    standReturnPhoto: text("stand_return_photo"),
+    standReturnTime: timestamp("stand_return_time", { withTimezone: true }),
     expenseTotal: numeric("expense_total", { precision: 12, scale: 2 })
       .notNull()
       .default("0"),

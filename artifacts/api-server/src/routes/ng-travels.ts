@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   appSettingsTable,
@@ -82,6 +82,16 @@ const startOfMonth = (day: string): string => `${day.slice(0, 7)}-01`;
 const normalizeTripStatus = (value: unknown): string => {
   const normalized = String(value ?? "").trim().toLowerCase().replaceAll(" ", "_");
   return normalized === "pending" ? "upcoming" : normalized;
+};
+
+// Trips that still need their driver/vehicle/customer — anything not yet
+// completed or cancelled. Used to block deleting a record mid-booking.
+const openTripsFor = async (condition: ReturnType<typeof eq>) => {
+  const rows = await db
+    .select({ bookingId: tripsTable.bookingId, status: tripsTable.status })
+    .from(tripsTable)
+    .where(condition);
+  return rows.filter((t) => !["completed", "cancelled"].includes(normalizeTripStatus(t.status)));
 };
 
 const defaultSettings = {
@@ -231,7 +241,7 @@ function tripView(
     returnDurationMinutes: trip.returnDurationMinutes ?? null,
     routeSummary: trip.routeSummary ?? null,
     selectedRouteSummary: trip.selectedRouteSummary ?? null,
-    routeOptions: trip.routeOptions ?? [],
+    routeOptions: withoutPolylines(trip.routeOptions),
     apiEstimatedToll: trip.apiEstimatedToll == null ? null : numeric(trip.apiEstimatedToll),
     estimatedToll: trip.estimatedToll == null ? null : numeric(trip.estimatedToll),
     finalToll: numeric(trip.finalToll ?? trip.toll),
@@ -261,12 +271,50 @@ function tripView(
     endKmLocation: trip.endKmLocation ?? null,
     endKmPhoto: trip.endKmPhoto ?? null,
     actualKm: trip.actualKm == null ? null : numeric(trip.actualKm),
+    standStartKm: trip.standStartKm == null ? null : numeric(trip.standStartKm),
+    standStartPhoto: trip.standStartPhoto ?? null,
+    standReturnKm: trip.standReturnKm == null ? null : numeric(trip.standReturnKm),
+    standReturnPhoto: trip.standReturnPhoto ?? null,
+    standReturnTime: trip.standReturnTime ?? null,
+    ...standDistances(trip),
     expenseTotal: numeric(trip.expenseTotal),
     cancellationReason: trip.cancellationReason ?? null,
     cancelledAt: trip.cancelledAt ?? null,
     isLocked: Boolean(trip.isLocked),
     createdAt: trip.createdAt instanceof Date ? trip.createdAt : new Date(trip.createdAt),
     updatedAt: trip.updatedAt ? (trip.updatedAt instanceof Date ? trip.updatedAt : new Date(trip.updatedAt)) : undefined,
+  };
+}
+
+// Route alternatives minus their map polylines. Nothing reads polylines back
+// from a saved trip, and they made up ~95% of every trips-list response.
+function withoutPolylines(routeOptions: unknown): any[] {
+  if (!Array.isArray(routeOptions)) return [];
+  return routeOptions.map((opt: any) => {
+    if (!opt || typeof opt !== "object") return opt;
+    const { polylineCoordinates, coordinates, ...rest } = opt;
+    return rest;
+  });
+}
+
+// Empty running at both ends of a trip, derived from the odometer readings:
+// stand -> pickup, drop -> stand, and the full stand -> stand total. Each is
+// null until both of its readings exist. Tracking only — never billed.
+function standDistances(trip: {
+  standStartKm?: string | null;
+  startingKm?: string | null;
+  endingKm?: string | null;
+  standReturnKm?: string | null;
+}) {
+  const km = (v: string | null | undefined) => (v == null ? null : numeric(v));
+  const diff = (to: number | null, from: number | null) =>
+    to != null && from != null ? Math.round((to - from) * 100) / 100 : null;
+  const standStart = km(trip.standStartKm);
+  const standReturn = km(trip.standReturnKm);
+  return {
+    standToPickupKm: diff(km(trip.startingKm), standStart),
+    dropToStandKm: diff(standReturn, km(trip.endingKm)),
+    standToStandKm: diff(standReturn, standStart),
   };
 }
 
@@ -365,8 +413,9 @@ router.post("/auth/driver-login", async (req, res): Promise<void> => {
     const allDrivers = await db.select().from(driversTable);
     const driver = allDrivers.find(
       (d) =>
-        (cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile)) ||
-        (cleanCode && d.driverCode.toUpperCase() === cleanCode)
+        d.status !== "archived" &&
+        ((cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile)) ||
+          (cleanCode && d.driverCode.toUpperCase() === cleanCode))
     );
 
     if (!driver || driver.status === "inactive") {
@@ -464,8 +513,9 @@ router.post("/auth/driver-password-reset-request", async (req, res): Promise<voi
     const allDrivers = await db.select().from(driversTable);
     const driver = allDrivers.find(
       (d) =>
-        (cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile)) ||
-        (cleanCode && d.driverCode.toUpperCase() === cleanCode)
+        d.status !== "archived" &&
+        ((cleanMobile.length >= 7 && d.mobile.replace(/\D/g, "").includes(cleanMobile)) ||
+          (cleanCode && d.driverCode.toUpperCase() === cleanCode))
     );
 
     if (driver) {
@@ -985,7 +1035,11 @@ router.get("/dashboard", requireOwner, async (_req, res): Promise<void> => {
 // =============================================================
 router.get("/drivers", requireOwner, async (_req, res): Promise<void> => {
   try {
-    const rows = await db.select().from(driversTable).orderBy(asc(driversTable.name));
+    const rows = await db
+      .select()
+      .from(driversTable)
+      .where(ne(driversTable.status, "archived"))
+      .orderBy(asc(driversTable.name));
     res.json(rows);
   } catch (err: any) {
     console.error("[drivers] Database query failed:", err?.message);
@@ -1091,6 +1145,47 @@ router.patch("/drivers/:id", requireOwner, async (req, res): Promise<void> => {
   }
 });
 
+// Soft delete: trips, expenses and payments keep foreign keys to the
+// driver, so the row is archived (hidden from lists, login blocked) rather
+// than removed, preserving trip history.
+router.delete("/drivers/:id", requireOwner, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  try {
+    const openTrips = await openTripsFor(eq(tripsTable.driverId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Driver is assigned to ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Reassign or close them first.`,
+        },
+      });
+      return;
+    }
+
+    const [row] = await db
+      .update(driversTable)
+      .set({ status: "archived", availability: "offline", updatedAt: new Date() })
+      .where(eq(driversTable.id, id))
+      .returning();
+
+    if (!row) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Driver not found" } });
+      return;
+    }
+
+    await db.update(usersTable).set({ status: "inactive" }).where(eq(usersTable.driverId, id));
+    await db.update(vehiclesTable).set({ assignedDriverId: null }).where(eq(vehiclesTable.assignedDriverId, id));
+
+    await writeAudit(req, "Deleted driver", "driver", id, row, null);
+    broadcastRealtimeEvent("DRIVER_STATUS_CHANGED", row);
+    res.json({ success: true, id });
+  } catch (err: any) {
+    console.error("[drivers] Delete error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to delete driver" } });
+  }
+});
+
 router.patch("/drivers/:id/availability", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   const { availability } = req.body;
@@ -1119,7 +1214,11 @@ router.patch("/drivers/:id/availability", async (req, res): Promise<void> => {
 // =============================================================
 router.get("/vehicles", async (_req, res): Promise<void> => {
   try {
-    const rows = await db.select().from(vehiclesTable).orderBy(asc(vehiclesTable.vehicleNumber));
+    const rows = await db
+      .select()
+      .from(vehiclesTable)
+      .where(ne(vehiclesTable.status, "archived"))
+      .orderBy(asc(vehiclesTable.vehicleNumber));
     res.json(rows.map(enrichVehicleWithAlerts));
   } catch (err: any) {
     console.error("[vehicles] Database query failed:", err?.message);
@@ -1217,11 +1316,35 @@ router.patch("/vehicles/:id", requireOwner, async (req, res): Promise<void> => {
   }
 });
 
+// Soft delete, same reasoning as drivers: trips keep a vehicle_id FK.
 router.delete("/vehicles/:id", requireOwner, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   try {
-    await db.update(vehiclesTable).set({ status: "inactive" }).where(eq(vehiclesTable.id, id));
-    await writeAudit(req, "Deactivated vehicle", "vehicle", id);
+    const openTrips = await openTripsFor(eq(tripsTable.vehicleId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Vehicle is assigned to ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Reassign or close them first.`,
+        },
+      });
+      return;
+    }
+
+    const [row] = await db
+      .update(vehiclesTable)
+      .set({ status: "archived", assignedDriverId: null, updatedAt: new Date() })
+      .where(eq(vehiclesTable.id, id))
+      .returning();
+
+    if (!row) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Vehicle not found" } });
+      return;
+    }
+
+    await writeAudit(req, "Deleted vehicle", "vehicle", id, row, null);
+    broadcastRealtimeEvent("VEHICLE_UPDATED", row);
     res.json({ success: true, id });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: err.message } });
@@ -1331,6 +1454,18 @@ router.patch("/customers/:id", requireOwner, async (req, res): Promise<void> => 
 router.delete("/customers/:id", requireOwner, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   try {
+    const openTrips = await openTripsFor(eq(tripsTable.customerId, id));
+    if (openTrips.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: "HAS_OPEN_TRIPS",
+          message: `Customer has ${openTrips.length} open trip(s) (${openTrips.map((t) => t.bookingId).join(", ")}). Complete or cancel them first.`,
+        },
+      });
+      return;
+    }
+
     await db.update(customersTable).set({ archived: true, updatedAt: new Date() }).where(eq(customersTable.id, id));
     await writeAudit(req, "Archived customer", "customer", id);
     res.json({ success: true, id });
@@ -1596,7 +1731,10 @@ router.get("/trips", async (req, res): Promise<void> => {
           statusFilter ? eq(tripsTable.status, statusFilter) : undefined
         )
       )
-      .orderBy(desc(tripsTable.startDate), desc(tripsTable.startTime));
+      // Newest bookings first, so a just-dispatched trip is always at the top.
+      // (Ordering by start date/time alone left same-day 08:00 trips in an
+      // arbitrary order, burying new bookings mid-list.)
+      .orderBy(desc(tripsTable.createdAt), desc(tripsTable.id));
 
     const customers = await db.select().from(customersTable);
     const customerMap = new Map(customers.map((c) => [c.id, c]));
@@ -1628,6 +1766,19 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
   const returnDateStr = req.body.returnDate ? dateOnly(req.body.returnDate) : null;
   const policy = req.body.billingDayPolicy || "CALENDAR_DAYS";
   const tripType = req.body.tripType || "single_trip";
+  const idempotencyKey = typeof req.body.idempotencyKey === "string" && req.body.idempotencyKey.trim()
+    ? req.body.idempotencyKey.trim()
+    : null;
+
+  // Same booking submitted again (double-click, network retry): return the
+  // trip already created instead of a duplicate trip + duplicate advance.
+  const findExistingBooking = async () => {
+    if (!idempotencyKey) return null;
+    const [existing] = await db.select().from(tripsTable).where(eq(tripsTable.idempotencyKey, idempotencyKey));
+    if (!existing) return null;
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, existing.customerId));
+    return tripView(existing, customer);
+  };
 
   // Everything below (fare calc, driver/vehicle lookups, the insert itself)
   // used to run partly outside any try/catch, so a thrown error here bypassed
@@ -1636,6 +1787,23 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
   // message, so it just shows a generic "Failed to create trip" with no way
   // to tell what actually went wrong. Wrapping the whole handler fixes that.
   try {
+    const alreadyCreated = await findExistingBooking();
+    if (alreadyCreated) {
+      res.status(200).json(alreadyCreated);
+      return;
+    }
+
+    // Every new booking records the stand odometer with photo proof
+    const standKm = Number(req.body.standStartKm);
+    if (req.body.standStartKm == null || req.body.standStartKm === "" || !Number.isFinite(standKm) || standKm <= 0) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Odometer reading at the stand is required." } });
+      return;
+    }
+    if (!req.body.standStartPhoto) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Odometer photo at the stand is required." } });
+      return;
+    }
+
     // 1. Authoritative Route Verification
     let journey: any = null;
     try {
@@ -1768,7 +1936,7 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       driverMobile,
       vehicleId: req.body.vehicleId ? Number(req.body.vehicleId) : null,
       vehicleNumber,
-      idempotencyKey: req.body.idempotencyKey || null,
+      idempotencyKey,
       tripType,
       pickup: req.body.pickup,
       destination: req.body.destination,
@@ -1784,12 +1952,15 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       outboundMapKm: String(commercialFare.outboundDistanceKm),
       returnMapKm: String(commercialFare.returnDistanceKm),
       totalMapKm: String(commercialFare.totalRoadDistanceKm),
+      // Odometer when the vehicle leaves the stand, captured at booking.
+      standStartKm: req.body.standStartKm != null && req.body.standStartKm !== "" ? String(Number(req.body.standStartKm)) : null,
+      standStartPhoto: req.body.standStartPhoto || null,
       routeDurationMinutes: verifiedTotalMinutes,
       outboundDurationMinutes: verifiedOutboundMinutes,
       returnDurationMinutes: verifiedReturnMinutes,
       routeSummary: journey?.alternatives[0]?.summary || req.body.routeSummary || `${commercialFare.totalRoadDistanceKm} km`,
       selectedRouteSummary: journey?.alternatives[0]?.summary || req.body.selectedRouteSummary || null,
-      routeOptions: journey?.alternatives || req.body.routeOptions || [],
+      routeOptions: withoutPolylines(journey?.alternatives || req.body.routeOptions),
       routeSnapshot,
       apiEstimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
       estimatedToll: commercialFare.toll > 0 ? String(commercialFare.toll) : null,
@@ -1859,6 +2030,15 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
     broadcastRealtimeEvent("TRIP_CREATED", view);
     res.status(201).json(view);
   } catch (err: any) {
+    // Two identical submissions raced past the lookup above; the unique
+    // index on idempotency_key rejected the second insert.
+    if (err?.code === "23505" || err?.cause?.code === "23505") {
+      const existing = await findExistingBooking().catch(() => null);
+      if (existing) {
+        res.status(200).json(existing);
+        return;
+      }
+    }
     console.error("[trips] Create error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: err?.message || "Failed to persist trip to database" } });
   }
@@ -2114,6 +2294,27 @@ router.get("/driver/current-trip", async (req, res): Promise<void> => {
       .orderBy(desc(tripsTable.updatedAt))
       .limit(1);
 
+    if (trips.length === 0 && driverId) {
+      // No active run — surface the latest trip completed in the last 2 days
+      // that still needs its back-at-stand odometer, so the driver app can
+      // prompt for it.
+      const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      const awaitingStand = await db
+        .select()
+        .from(tripsTable)
+        .where(
+          and(
+            eq(tripsTable.driverId, driverId),
+            eq(tripsTable.status, "completed"),
+            isNull(tripsTable.standReturnKm),
+            gte(tripsTable.updatedAt, since)
+          )
+        )
+        .orderBy(desc(tripsTable.updatedAt))
+        .limit(1);
+      trips.push(...awaitingStand);
+    }
+
     if (trips.length === 0) {
       // No active trip is a normal, expected state (not an error) — the
       // driver simply has nothing in progress right now.
@@ -2237,6 +2438,21 @@ router.post("/driver/trips/:id/start", async (req, res): Promise<void> => {
   }
 
   try {
+    const [existing] = await db
+      .select({ standStartKm: tripsTable.standStartKm })
+      .from(tripsTable)
+      .where(eq(tripsTable.id, id));
+    if (existing?.standStartKm != null && startKmNum < numeric(existing.standStartKm)) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `Pickup KM (${startKmNum}) cannot be less than the KM when the vehicle left the stand (${numeric(existing.standStartKm)}).`,
+        },
+      });
+      return;
+    }
+
     const [trip] = await db
       .update(tripsTable)
       .set({
@@ -2432,6 +2648,93 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
   } catch (err: any) {
     console.error("[driver/complete] Error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to complete trip" } });
+  }
+});
+
+/**
+ * Record the odometer once the vehicle is back at the stand after the drop.
+ * Open to the trip's own driver (once) and to ops staff (any time, to
+ * correct it). Tracking only — the completed trip's fare is not touched.
+ */
+router.post("/trips/:id/stand-return", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const { standReturnKm, photoUrl } = req.body;
+  const kmNum = Number(standReturnKm);
+
+  if (standReturnKm == null || standReturnKm === "" || !Number.isFinite(kmNum) || kmNum <= 0) {
+    res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Please enter a valid back-at-stand odometer reading." } });
+    return;
+  }
+
+  try {
+    const viewer = await viewerFor(req);
+    if (!viewer) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Please sign in again." } });
+      return;
+    }
+
+    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    if (!trip) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
+      return;
+    }
+
+    const isDriver = viewer.role === "driver";
+    if (isDriver && trip.driverId !== viewer.driverId) {
+      res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "This trip isn't assigned to you." } });
+      return;
+    }
+    if (isDriver && trip.standReturnKm != null) {
+      res.status(409).json({ success: false, error: { code: "ALREADY_RECORDED", message: "Back-at-stand KM is already recorded. Ask the office to correct it." } });
+      return;
+    }
+    if (trip.status !== "completed" || trip.endingKm == null) {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Complete the trip (enter the drop KM) before recording the back-at-stand KM." } });
+      return;
+    }
+    if (kmNum < numeric(trip.endingKm)) {
+      res.status(400).json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: `Back-at-stand KM (${kmNum}) cannot be less than the drop KM (${numeric(trip.endingKm)}).` },
+      });
+      return;
+    }
+
+    const [updated] = await db
+      .update(tripsTable)
+      .set({
+        standReturnKm: String(kmNum),
+        standReturnPhoto: photoUrl || trip.standReturnPhoto || null,
+        standReturnTime: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(tripsTable.id, id))
+      .returning();
+
+    if (trip.vehicleId) {
+      await db
+        .update(vehiclesTable)
+        .set({ currentOdometerKm: String(kmNum), updatedAt: new Date() })
+        .where(eq(vehiclesTable.id, trip.vehicleId));
+    }
+
+    const { dropToStandKm } = standDistances(updated);
+    await db.insert(tripStatusHistoryTable).values({
+      tripId: id,
+      status: "completed",
+      odometerKm: String(kmNum),
+      note: `Vehicle back at stand: ${kmNum} KM (drop to stand ${dropToStandKm ?? "-"} KM)`,
+      changedBy: viewer.name || (isDriver ? trip.driverName || "Driver" : "Operations Admin"),
+    });
+
+    await writeAudit(req, `Recorded back-at-stand KM ${kmNum} for ${trip.bookingId}`, "trip", id);
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, updated.customerId));
+    const view = tripView(updated, customer);
+    broadcastRealtimeEvent("TRIP_UPDATED", view);
+    res.json(view);
+  } catch (err: any) {
+    console.error("[trips/stand-return] Error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
   }
 });
 

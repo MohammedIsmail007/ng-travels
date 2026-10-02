@@ -22,6 +22,10 @@ export interface TripExportRow {
   startingKm?: number | null;
   endingKm?: number | null;
   actualKm?: number | null;
+  standStartKm?: number | null;
+  standReturnKm?: number | null;
+  standToPickupKm?: number | null;
+  dropToStandKm?: number | null;
   expenseTotal?: number;
   profit?: number;
   paymentStatus: string;
@@ -54,6 +58,10 @@ export function exportTripsToXLSX(
     "Start KM": t.startingKm ?? "-",
     "End KM": t.endingKm ?? "-",
     "Actual KM": t.actualKm ?? "-",
+    "Stand Out KM": t.standStartKm ?? "-",
+    "Stand In KM": t.standReturnKm ?? "-",
+    "Stand → Pickup KM": t.standToPickupKm ?? "-",
+    "Drop → Stand KM": t.dropToStandKm ?? "-",
     "Company Expenses (₹)": t.expenseTotal ?? 0,
     "Profit (₹)": t.profit ?? t.customerTotal - (t.expenseTotal ?? 0),
     "Payment Status": t.remainingBalance <= 0 ? "Fully Paid" : t.totalPaid > 0 ? "Partially Paid" : "Unpaid",
@@ -86,6 +94,10 @@ export function exportTripsToXLSX(
     { wch: 10 }, // Start KM
     { wch: 10 }, // End KM
     { wch: 10 }, // Actual KM
+    { wch: 12 }, // Stand Out KM
+    { wch: 12 }, // Stand In KM
+    { wch: 16 }, // Stand -> Pickup KM
+    { wch: 16 }, // Drop -> Stand KM
     { wch: 16 }, // Expenses
     { wch: 14 }, // Profit
     { wch: 14 }, // Payment Status

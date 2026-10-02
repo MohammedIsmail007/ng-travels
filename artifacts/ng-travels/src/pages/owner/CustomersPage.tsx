@@ -1,9 +1,13 @@
 import React, { useState } from "react";
-import { Users, Search, Plus, Phone, Mail, MapPin, ArrowUpRight, CheckCircle2, CircleDollarSign } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Users, Search, Plus, Phone, Mail, MapPin, ArrowUpRight, CheckCircle2, CircleDollarSign, Trash2 } from "lucide-react";
+import { apiFetch } from "@/lib/apiFetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/lib/fareEngine";
 import { NGTravelsLoader } from "@/components/loading";
+import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 
 interface CustomersPageProps {
   customers: any[];
@@ -12,7 +16,27 @@ interface CustomersPageProps {
 }
 
 export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], isLoading = false }) => {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [deletingCustomer, setDeletingCustomer] = useState<any | null>(null);
+
+  // Server archives the customer so their past trips and payments stay intact
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiFetch(`/api/customers/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || "Failed to delete customer");
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast.success("Customer deleted");
+      setDeletingCustomer(null);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
 
   const customerList = Array.isArray(customers) ? customers : (Array.isArray((customers as any)?.items) ? (customers as any).items : []);
 
@@ -80,9 +104,18 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], is
                 <span className="font-mono text-[11px] text-amber-700 dark:text-amber-400 font-bold">{c.customerId || c.customerCode}</span>
                 <h3 className="font-bold text-sm text-foreground mt-0.5">{c.name}</h3>
               </div>
-              <span className="text-[10px] bg-muted text-foreground font-mono px-2 py-0.5 rounded border border-border">
-                {c.totalTrips || 0} Trip(s)
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] bg-muted text-foreground font-mono px-2 py-0.5 rounded border border-border">
+                  {c.totalTrips || 0} Trip(s)
+                </span>
+                <button
+                  onClick={() => setDeletingCustomer(c)}
+                  className="p-1.5 rounded-lg bg-muted/80 hover:bg-rose-100 hover:dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors cursor-pointer"
+                  title="Delete customer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1.5 text-xs text-muted-foreground">
@@ -120,6 +153,20 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], is
         ))}
         </div>
       )}
+
+      <ConfirmDeleteDialog
+        isOpen={Boolean(deletingCustomer)}
+        title="Delete Customer"
+        description={
+          <>
+            Remove <strong className="text-foreground">{deletingCustomer?.name}</strong> ({deletingCustomer?.mobile}) from the customer directory?
+            Their past trips and payments are kept. Customers with open trips can't be deleted until those trips are completed or cancelled.
+          </>
+        }
+        loading={deleteMutation.isPending}
+        onConfirm={() => deletingCustomer && deleteMutation.mutate(deletingCustomer.id)}
+        onClose={() => setDeletingCustomer(null)}
+      />
     </div>
   );
 };

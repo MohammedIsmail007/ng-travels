@@ -284,8 +284,17 @@ class SyncEngine {
         }
       }
 
+      // Reads give up after 12s; writes (trip saves recompute the route
+      // server-side, uploads, etc.) get 60s — aborting a write early only
+      // hides a save that the server still completes.
+      const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const isWrite = method !== "GET" && method !== "HEAD";
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, isWrite ? 60000 : 12000);
 
       const modifiedInit: RequestInit = {
         ...init,
@@ -304,15 +313,22 @@ class SyncEngine {
         // Standardized offline / network error response so React Query and UI handle it cleanly
         const errorPayload = {
           success: false,
-          error: {
-            code: "NETWORK_ERROR",
-            message: "Unable to reach server. Please check your internet connection.",
-          },
+          error: timedOut
+            ? {
+                code: "TIMEOUT",
+                message: isWrite
+                  ? "The server is taking too long to respond. Your change may still have been saved — please check before trying again."
+                  : "The server is taking too long to respond. Please try again.",
+              }
+            : {
+                code: "NETWORK_ERROR",
+                message: "Unable to reach server. Please check your internet connection.",
+              },
         };
 
         return new Response(JSON.stringify(errorPayload), {
-          status: 503,
-          statusText: "Service Unavailable",
+          status: timedOut ? 504 : 503,
+          statusText: timedOut ? "Gateway Timeout" : "Service Unavailable",
           headers: { "Content-Type": "application/json" },
         });
       }
