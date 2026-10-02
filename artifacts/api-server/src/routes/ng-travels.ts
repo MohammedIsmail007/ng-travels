@@ -3235,10 +3235,10 @@ router.get("/settings", requireOwner, async (_req, res): Promise<void> => {
  * valid update-check response and can prompt the user to install this one.
  */
 const CURRENT_APP_VERSION = {
-  versionCode: 11,
-  versionName: "1.3.3",
+  versionCode: 12,
+  versionName: "1.3.4",
   url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
-  releaseNotes: "Fixes the Settings page APK download button, which could get stuck at 100% inside the app — it now hands off to Chrome to download and install.",
+  releaseNotes: "Stand-to-stand KM tracking: record the odometer (with photo, now required) when the vehicle leaves the stand and when it returns, with stand-to-pickup and drop-to-stand distances shown on each trip. Delete customers, vehicles and drivers. Route Planner bookings now carry the full route into the trip form. Fixes duplicate bookings, missing new trips in the list, and save errors on long routes.",
 };
 const APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
