@@ -3235,13 +3235,13 @@ router.get("/settings", requireOwner, async (_req, res): Promise<void> => {
  * valid update-check response and can prompt the user to install this one.
  */
 const CURRENT_APP_VERSION = {
-  versionCode: 13,
-  versionName: "1.3.5",
+  versionCode: 14,
+  versionName: "1.3.6",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Fixes the Download Update button: the APK now downloads in Chrome instead of getting stuck at 100% inside the app. Includes everything from 1.3.4 (stand-to-stand KM tracking, delete for customers/vehicles/drivers, Route Planner prefill and booking fixes).",
+  releaseNotes: "Route Planner: live place-suggestions for intermediate waypoints, per-leg (outbound/return) waypoint routing for asymmetric round trips, and corrected toll pricing that now checks both legs independently instead of only the outbound path.",
 };
 const APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
