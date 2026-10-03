@@ -95942,6 +95942,29 @@ function estimateTollForRoute(coordinates, rateMode) {
   const totalToll = matches.reduce((sum, m) => sum + m.rate, 0);
   return { totalToll, plazas: matches };
 }
+function estimateTollForRoundTrip(outboundCoordinates, returnCoordinates, rateMode) {
+  const out = estimateTollForRoute(outboundCoordinates, "single");
+  const ret = estimateTollForRoute(returnCoordinates, "single");
+  if (rateMode === "round_trip_multi_day") {
+    const plazas = [...out.plazas, ...ret.plazas];
+    return { totalToll: plazas.reduce((sum, m) => sum + m.rate, 0), plazas };
+  }
+  const retById = new Map(ret.plazas.map((m) => [m.id, m]));
+  const merged = [];
+  for (const m of out.plazas) {
+    const roundTripMatch = retById.has(m.id);
+    if (roundTripMatch) {
+      const plaza = tollPlazas.find((p) => p.id === m.id);
+      merged.push({ ...m, rate: plaza ? plaza.carReturn : m.rate * 2 });
+      retById.delete(m.id);
+    } else {
+      merged.push(m);
+    }
+  }
+  merged.push(...retById.values());
+  merged.sort((a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm);
+  return { totalToll: merged.reduce((sum, m) => sum + m.rate, 0), plazas: merged };
+}
 
 // src/lib/routeService.ts
 var GOOGLE_API_KEY = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_ROUTES_API_KEY || "";
@@ -96390,18 +96413,21 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
       }
     }
   }
-  const waypoints = stops.filter((s) => s.latitude && s.longitude).map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
+  const legOf = (s) => s.leg || "both";
+  const geocodedStops = stops.filter((s) => s.latitude && s.longitude);
+  const outboundWaypoints = geocodedStops.filter((s) => legOf(s) !== "return").map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
+  const returnWaypoints = [...geocodedStops].reverse().filter((s) => legOf(s) !== "outbound").map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
   const [outbound, returnLegResult] = await Promise.all([
     cachedDrivingLeg(
       { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
       { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
-      waypoints,
+      outboundWaypoints,
       options
     ),
     isRoundTrip ? cachedDrivingLeg(
       { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
       { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
-      [...waypoints].reverse(),
+      returnWaypoints,
       options
     ) : Promise.resolve(void 0)
   ]);
@@ -96426,7 +96452,7 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
   let tollRateMode = null;
   if (!tollAvailable) {
     tollRateMode = resolveTollRateMode(isRoundTrip, startDate, startTime, returnDate, returnTime);
-    const tollEstimate = estimateTollForRoute(outbound.coordinates, tollRateMode);
+    const tollEstimate = isRoundTrip && returnLeg ? estimateTollForRoundTrip(outbound.coordinates, returnLeg.coordinates, tollRateMode) : estimateTollForRoute(outbound.coordinates, "single");
     estimatedToll = tollEstimate.totalToll;
     tollPlazas2 = tollEstimate.plazas;
     tollAvailable = true;
@@ -96439,13 +96465,13 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
         cachedDrivingLeg(
           { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
           { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
-          waypoints,
+          outboundWaypoints,
           { ...options, avoidTolls: true }
         ),
         isRoundTrip ? cachedDrivingLeg(
           { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || void 0 },
           { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || void 0 },
-          [...waypoints].reverse(),
+          returnWaypoints,
           { ...options, avoidTolls: true }
         ) : Promise.resolve(void 0)
       ]);
@@ -96473,6 +96499,7 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
       console.warn("[routeService] Toll-free alternative computation failed:", err);
     }
   }
+  const primaryTollStatus = tollSource === "google_routes" ? "Estimated from Routes API" : tollSource === "nhai_open_dataset" ? "Estimated from NHAI toll-plaza open data" : "Unavailable / At Actuals";
   const alternatives = [
     {
       routeIndex: 0,
@@ -96481,9 +96508,10 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
       durationMinutes: totalDurationMinutes,
       estimatedToll: estimatedToll || 0,
       via: tollFreeAlt ? isRoundTrip ? "Outbound & Return via toll roads (fastest)" : "Fastest route via toll roads" : isRoundTrip ? "Outbound & Return via National Highway" : "Fastest National Highway",
-      polylineCoordinates: outbound.coordinates
+      polylineCoordinates: outbound.coordinates,
+      tollStatus: primaryTollStatus
     },
-    ...tollFreeAlt ? [tollFreeAlt] : []
+    ...tollFreeAlt ? [{ ...tollFreeAlt, tollStatus: "Toll-free route (avoids toll roads)" }] : []
   ];
   return {
     provider: GOOGLE_API_KEY ? "google_routes" : "geoapify",

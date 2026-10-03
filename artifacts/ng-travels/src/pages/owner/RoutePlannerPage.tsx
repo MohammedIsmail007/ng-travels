@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/apiFetch";
 import React, { useState, useEffect, useRef } from "react";
 import {
-  MapPin, Navigation, Plus, Trash2, IndianRupee, Clock, ArrowRight,
+  MapPin, Navigation, Plus, IndianRupee, Clock, ArrowRight,
   Sparkles, Compass, ShieldCheck, Car, AlertCircle, CheckCircle2, RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,11 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
   const [destInput, setDestInput] = useState("");
   const [selectedDest, setSelectedDest] = useState<PlaceSuggestion | null>(null);
 
-  const [stops, setStops] = useState<string[]>([]);
+  const [stops, setStops] = useState<any[]>([]);
+  const [stopInput, setStopInput] = useState("");
+  const [stopSuggestions, setStopSuggestions] = useState<any[]>([]);
+  const [stopSearching, setStopSearching] = useState(false);
+  const stopSearchBoxRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [tripType, setTripType] = useState<"single" | "round">("round");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -56,6 +60,90 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
   const [tollRateMode, setTollRateMode] = useState<string | null>(null);
 
   const reqIdRef = useRef(0);
+
+  // Waypoint search: live autocomplete for the "Add Stop" field, same
+  // endpoint the Pickup/Destination pickers use, so a stop carries real
+  // coordinates instead of free text that has to be geocoded blind at
+  // submit time.
+  useEffect(() => {
+    if (!stopInput || stopInput.length < 2) {
+      setStopSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setStopSearching(true);
+      try {
+        const res = await apiFetch(`/api/maps/places/autocomplete?input=${encodeURIComponent(stopInput)}`, {
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        setStopSuggestions(Array.isArray(data) ? data : []);
+      } catch (err: any) {
+        if (err.name !== "AbortError") setStopSuggestions([]);
+      } finally {
+        setStopSearching(false);
+      }
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [stopInput]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (stopSearchBoxRef.current && !stopSearchBoxRef.current.contains(e.target as Node)) {
+        setStopSuggestions([]);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleAddStop = () => {
+    if (stopInput.trim()) {
+      setStops([...stops, { name: stopInput.trim(), address: stopInput.trim(), leg: "both" }]);
+      setStopInput("");
+      setStopSuggestions([]);
+    }
+  };
+
+  const handleSelectStopSuggestion = (place: any) => {
+    setStops([
+      ...stops,
+      {
+        name: place.name,
+        address: place.formattedAddress || place.name,
+        lat: place.lat ?? place.latitude,
+        lng: place.lng ?? place.longitude,
+        latitude: place.latitude ?? place.lat,
+        longitude: place.longitude ?? place.lng,
+        placeId: place.placeId,
+        leg: "both",
+      },
+    ]);
+    setStopInput("");
+    setStopSuggestions([]);
+  };
+
+  const handleRemoveStop = (idx: number) => {
+    setStops(stops.filter((_, i) => i !== idx));
+  };
+
+  // Cycles a waypoint between the outbound leg, the return leg, or both —
+  // lets a round trip route through different stops on the way out vs. the
+  // way back instead of forcing every waypoint onto both directions.
+  const LEG_CYCLE = ["both", "outbound", "return"] as const;
+  const handleCycleLeg = (idx: number) => {
+    setStops(
+      stops.map((s, i) => {
+        if (i !== idx) return s;
+        const current = LEG_CYCLE.indexOf((s.leg || "both") as any);
+        return { ...s, leg: LEG_CYCLE[(current + 1) % LEG_CYCLE.length] };
+      })
+    );
+  };
 
   // Calculate Real Driving Route
   const handleCalculate = async () => {
@@ -85,7 +173,16 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
           state: selectedDest.state,
           country: selectedDest.country,
         } : { name: destInput, address: destInput },
-        stops: stops.filter((s) => s.trim() !== "").map((s) => ({ name: s, address: s })),
+        stops: stops
+          .filter((s) => (s.name || "").trim() !== "")
+          .map((s) => ({
+            name: s.name,
+            address: s.address || s.name,
+            latitude: s.lat ?? s.latitude,
+            longitude: s.lng ?? s.longitude,
+            placeId: s.placeId,
+            leg: s.leg || "both",
+          })),
         tripType: tripType === "round" ? "round_trip" : "single_trip",
       };
 
@@ -150,7 +247,9 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
     return {
       pickup: toLocation(selectedPickup, pickupInput),
       destination: toLocation(selectedDest, destInput),
-      stops: stops.filter((st) => st.trim() !== "").map((st) => ({ name: st, address: st })),
+      stops: stops
+        .filter((st) => (st.name || "").trim() !== "")
+        .map((st) => ({ name: st.name, address: st.address || st.name, lat: st.lat, lng: st.lng, placeId: st.placeId, leg: st.leg || "both" })),
       tripType: tripType === "round" ? "round_trip" : "single_trip",
       routes,
       selectedRouteIdx,
@@ -258,31 +357,88 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
 
           {/* Intermediate Stops */}
           <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <label className="text-[11px] text-purple-700 dark:text-purple-400 font-bold uppercase flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-purple-400" /> Intermediate Waypoints
-              </label>
-              <Button size="sm" variant="ghost" onClick={() => setStops([...stops, ""])} className="text-xs text-amber-700 dark:text-amber-400 h-6 px-2 hover:bg-amber-950/20">
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add Stop
-              </Button>
-            </div>
-            {stops.map((stop, idx) => (
-              <div key={idx} className="flex gap-2 items-center">
+            <label className="text-[11px] text-purple-700 dark:text-purple-400 font-bold uppercase flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-purple-400" /> Intermediate Waypoints
+            </label>
+            <div className="relative" ref={stopSearchBoxRef}>
+              <div className="flex gap-2">
                 <Input
-                  value={stop}
-                  onChange={(e) => {
-                    const next = [...stops];
-                    next[idx] = e.target.value;
-                    setStops(next);
+                  value={stopInput}
+                  onChange={(e) => setStopInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    if (stopSuggestions.length > 0) {
+                      handleSelectStopSuggestion(stopSuggestions[0]);
+                    } else {
+                      handleAddStop();
+                    }
                   }}
-                  placeholder={`Waypoint ${idx + 1} (e.g. Mandya, Maddur, Mysore Road)...`}
+                  placeholder="Search a place (e.g. Mandya, Maddur, Mysore Road)..."
                   className="bg-background border-border text-xs h-9 flex-1"
                 />
-                <Button size="sm" variant="ghost" onClick={() => setStops(stops.filter((_, i) => i !== idx))} className="text-rose-700 dark:text-rose-400 hover:bg-rose-950/20 h-8 w-8 p-0">
-                  <Trash2 className="w-3.5 h-3.5" />
+                <Button size="sm" type="button" onClick={handleAddStop} className="bg-muted hover:bg-muted text-foreground text-xs h-9 cursor-pointer">
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add
                 </Button>
               </div>
-            ))}
+              {stopSearching && (
+                <span className="text-[10px] text-muted-foreground absolute right-16 top-2.5">Searching...</span>
+              )}
+              {stopSuggestions.length > 0 && (
+                <div className="absolute z-20 left-0 right-16 top-10 bg-card border border-border rounded-xl overflow-hidden shadow-2xl max-h-48 overflow-y-auto">
+                  {stopSuggestions.map((place, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => handleSelectStopSuggestion(place)}
+                      className="p-2.5 hover:bg-muted text-xs text-foreground cursor-pointer border-b border-border/60 last:border-0"
+                    >
+                      <div className="font-semibold">{place.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{place.formattedAddress}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Pick a search result to route through accurately — free text with no result selected is geocoded as a best guess.
+              {tripType === "round" && " Tap a waypoint's leg tag to restrict it to just the outbound or return journey."}
+            </p>
+            {stops.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {stops.map((stop, idx) => (
+                  <div key={idx} className="flex items-center gap-1.5 bg-muted/90 text-foreground px-2.5 py-1 rounded-lg text-xs border border-border">
+                    <span className="text-[10px] text-amber-700 dark:text-amber-400 font-mono">#{idx + 1}</span>
+                    {(stop.lat || stop.latitude) && (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    )}
+                    <span>{stop.name}</span>
+                    {tripType === "round" && (
+                      <button
+                        type="button"
+                        onClick={() => handleCycleLeg(idx)}
+                        title="Tap to cycle: Both legs → Outbound only → Return only"
+                        className={`ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide cursor-pointer border ${
+                          (stop.leg || "both") === "outbound"
+                            ? "bg-sky-950/40 border-sky-400/50 text-sky-700 dark:text-sky-300"
+                            : (stop.leg || "both") === "return"
+                              ? "bg-purple-950/40 border-purple-400/50 text-purple-700 dark:text-purple-300"
+                              : "bg-background border-border text-muted-foreground"
+                        }`}
+                      >
+                        {(stop.leg || "both") === "outbound" ? "Outbound" : (stop.leg || "both") === "return" ? "Return" : "Both Legs"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveStop(idx)}
+                      className="text-muted-foreground hover:text-rose-700 hover:dark:text-rose-400 cursor-pointer ml-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Destination */}
@@ -423,7 +579,7 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
               lat: selectedDest?.lat,
               lng: selectedDest?.lng,
             }}
-            stops={stops.filter((s) => s.trim() !== "").map((s) => ({ name: s, address: s }))}
+            stops={stops.filter((s) => (s.name || "").trim() !== "")}
             selectedRouteSummary={selected?.summary}
             billingKm={totalMapKm || selected?.distanceKm || 0}
             outboundMapKm={outboundMapKm}
@@ -436,6 +592,7 @@ export const RoutePlannerPage: React.FC<RoutePlannerPageProps> = ({ onOpenTripWi
             returnCoordinates={returnCoordinates}
             routeCoordinates={routeCoordinates}
             estimatedToll={estimatedToll}
+            tollStatus={tollStatus}
             height="520px"
           />
 

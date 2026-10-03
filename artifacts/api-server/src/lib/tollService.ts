@@ -208,3 +208,48 @@ export function estimateTollForRoute(
   const totalToll = matches.reduce((sum, m) => sum + m.rate, 0);
   return { totalToll, plazas: matches };
 }
+
+/**
+ * Round-trip toll estimate that matches the outbound and return legs
+ * against the NHAI dataset independently, instead of assuming both legs
+ * retrace the same road (which breaks once a leg routes through its own
+ * waypoints and takes a genuinely different path). A plaza crossed on only
+ * one leg — the common case for an asymmetric outbound/return route — is
+ * billed as a single crossing; a plaza crossed on both legs is treated as
+ * the same booth and billed once at the round-trip rate (or twice at the
+ * single rate when the gap is beyond the 24-hour same-day window).
+ */
+export function estimateTollForRoundTrip(
+  outboundCoordinates: [number, number][],
+  returnCoordinates: [number, number][],
+  rateMode: TollRateMode,
+): TollEstimateResult {
+  const out = estimateTollForRoute(outboundCoordinates, "single");
+  const ret = estimateTollForRoute(returnCoordinates, "single");
+
+  if (rateMode === "round_trip_multi_day") {
+    // Beyond the 24-hour concession window, every crossing is billed fresh —
+    // the same plaza on both legs is just two single-rate crossings.
+    const plazas = [...out.plazas, ...ret.plazas];
+    return { totalToll: plazas.reduce((sum, m) => sum + m.rate, 0), plazas };
+  }
+
+  const retById = new Map(ret.plazas.map((m) => [m.id, m]));
+  const merged: TollMatch[] = [];
+
+  for (const m of out.plazas) {
+    const roundTripMatch = retById.has(m.id);
+    if (roundTripMatch) {
+      const plaza = tollPlazas.find((p) => p.id === m.id);
+      merged.push({ ...m, rate: plaza ? plaza.carReturn : m.rate * 2 });
+      retById.delete(m.id);
+    } else {
+      merged.push(m); // only crossed outbound
+    }
+  }
+  // Whatever's left in retById was only crossed on the return leg.
+  merged.push(...retById.values());
+
+  merged.sort((a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm);
+  return { totalToll: merged.reduce((sum, m) => sum + m.rate, 0), plazas: merged };
+}

@@ -1333,6 +1333,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                     outboundCoordinates={outboundCoordinates}
                     returnCoordinates={returnCoordinates}
                     estimatedToll={estimatedToll || finalToll}
+                    tollStatus={tollStatus}
                     tollPlazas={displayedTollPlazas}
                   />
                 )}

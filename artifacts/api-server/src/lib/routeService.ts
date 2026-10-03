@@ -1,5 +1,5 @@
 import type { TripLocation, RouteAlternative } from "@workspace/db/schema";
-import { estimateTollForRoute, type TollMatch, type TollRateMode } from "./tollService.js";
+import { estimateTollForRoute, estimateTollForRoundTrip, type TollMatch, type TollRateMode } from "./tollService.js";
 
 export interface PlaceSearchResult {
   placeId: string;
@@ -645,8 +645,21 @@ export async function calculateRouteJourney(
     }
   }
 
-  const waypoints = stops
-    .filter((s) => s.latitude && s.longitude)
+  // Each stop can be tagged to the outbound leg, the return leg, or both
+  // (the default, for a simple symmetric loop) — so an asymmetric round
+  // trip that goes out via one place and comes back via a different one
+  // actually routes through the right waypoints on each leg, instead of
+  // forcing every waypoint onto both directions.
+  const legOf = (s: TripLocation): "outbound" | "return" | "both" =>
+    ((s as any).leg as "outbound" | "return" | "both" | undefined) || "both";
+
+  const geocodedStops = stops.filter((s) => s.latitude && s.longitude);
+  const outboundWaypoints = geocodedStops
+    .filter((s) => legOf(s) !== "return")
+    .map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
+  const returnWaypoints = [...geocodedStops]
+    .reverse()
+    .filter((s) => legOf(s) !== "outbound")
     .map((s) => ({ lat: Number(s.latitude), lng: Number(s.longitude) }));
 
   // 1. Outbound Leg (Pickup -> Destination) and, for a round trip, the
@@ -655,14 +668,14 @@ export async function calculateRouteJourney(
     cachedDrivingLeg(
       { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
       { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-      waypoints,
+      outboundWaypoints,
       options,
     ),
     isRoundTrip
       ? cachedDrivingLeg(
           { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
           { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-          [...waypoints].reverse(),
+          returnWaypoints,
           options,
         )
       : Promise.resolve(undefined),
@@ -692,16 +705,20 @@ export async function calculateRouteJourney(
 
   // Neither Google Routes (not configured here) nor Geoapify provide toll
   // pricing — fall back to matching NHAI toll plazas (open dataset) against
-  // the outbound road path. Outbound and return normally retrace the same
-  // highway, so this is priced once for the whole journey, at whichever
-  // NHAI fare basis the actual outbound/return gap earns (same-day
-  // discounted rate, or the full rate for both crossings beyond 24 hours).
+  // the actual road path(s). A round trip matches the outbound and return
+  // legs independently rather than assuming they retrace the same highway,
+  // so a toll plaza that only the return leg passes (e.g. because it routes
+  // through different waypoints) still gets picked up instead of silently
+  // dropping out.
   let tollSource: ComputedRouteOptions["tollSource"] = tollAvailable ? "google_routes" : null;
   let tollPlazas: TollMatch[] = [];
   let tollRateMode: TollRateMode | null = null;
   if (!tollAvailable) {
     tollRateMode = resolveTollRateMode(isRoundTrip, startDate, startTime, returnDate, returnTime);
-    const tollEstimate = estimateTollForRoute(outbound.coordinates, tollRateMode);
+    const tollEstimate =
+      isRoundTrip && returnLeg
+        ? estimateTollForRoundTrip(outbound.coordinates, returnLeg.coordinates, tollRateMode)
+        : estimateTollForRoute(outbound.coordinates, "single");
     estimatedToll = tollEstimate.totalToll;
     tollPlazas = tollEstimate.plazas;
     tollAvailable = true;
@@ -719,14 +736,14 @@ export async function calculateRouteJourney(
         cachedDrivingLeg(
           { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
           { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
-          waypoints,
+          outboundWaypoints,
           { ...options, avoidTolls: true },
         ),
         isRoundTrip
           ? cachedDrivingLeg(
               { lat: dLat, lng: dLng, name: destination.name, placeId: destination.placeId || undefined },
               { lat: pLat, lng: pLng, name: pickup.name, placeId: pickup.placeId || undefined },
-              [...waypoints].reverse(),
+              returnWaypoints,
               { ...options, avoidTolls: true },
             )
           : Promise.resolve(undefined),
@@ -763,6 +780,13 @@ export async function calculateRouteJourney(
     }
   }
 
+  const primaryTollStatus =
+    tollSource === "google_routes"
+      ? "Estimated from Routes API"
+      : tollSource === "nhai_open_dataset"
+        ? "Estimated from NHAI toll-plaza open data"
+        : "Unavailable / At Actuals";
+
   const alternatives: RouteAlternative[] = [
     {
       routeIndex: 0,
@@ -774,8 +798,9 @@ export async function calculateRouteJourney(
         ? (isRoundTrip ? "Outbound & Return via toll roads (fastest)" : "Fastest route via toll roads")
         : (isRoundTrip ? "Outbound & Return via National Highway" : "Fastest National Highway"),
       polylineCoordinates: outbound.coordinates,
+      tollStatus: primaryTollStatus,
     },
-    ...(tollFreeAlt ? [tollFreeAlt] : []),
+    ...(tollFreeAlt ? [{ ...tollFreeAlt, tollStatus: "Toll-free route (avoids toll roads)" }] : []),
   ];
 
   return {

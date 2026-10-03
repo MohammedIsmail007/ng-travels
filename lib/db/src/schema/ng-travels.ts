@@ -25,6 +25,11 @@ export type TripLocation = {
   district?: string | null;
   state?: string | null;
   country?: string | null;
+  // Intermediate waypoints only: which leg of a round trip this stop
+  // belongs on. Omitted/"both" keeps the default symmetric-loop behavior
+  // (same stop routed on the way out and the way back); "outbound" or
+  // "return" restricts it to just that leg, for an asymmetric route.
+  leg?: "outbound" | "return" | "both" | null;
 };
 
 export type RouteAlternative = {
@@ -40,6 +45,11 @@ export type RouteAlternative = {
   // toll-avoiding detour actually is, so the UI can say "+X km" instead of
   // implying a wholly different road when it's really a short local bypass.
   extraKm?: number;
+  // Human-readable toll pricing source/caveat for this specific alternative
+  // (e.g. "Estimated from NHAI toll-plaza open data") — lets the UI show an
+  // accurate caveat per option instead of a generic fallback when the toll
+  // amount is 0 but pricing data wasn't actually confirmed.
+  tollStatus?: string;
 };
 
 export type RouteSnapshotLeg = {

@@ -40,6 +40,7 @@ export interface RealtimeFleetMapProps {
   showRoutePolyline?: boolean;
   selectedRouteSummary?: string;
   estimatedToll?: number;
+  tollStatus?: string;
   billingKm?: number;
   className?: string;
   routeCoordinates?: [number, number][];
@@ -104,6 +105,7 @@ export const RealtimeFleetMap: React.FC<RealtimeFleetMapProps> = ({
   showRoutePolyline = true,
   selectedRouteSummary,
   estimatedToll = 0,
+  tollStatus,
   billingKm = 0,
   className = "",
   routeCoordinates = [],
@@ -648,7 +650,7 @@ export const RealtimeFleetMap: React.FC<RealtimeFleetMapProps> = ({
             <div className="flex items-center gap-1.5">
               <CircleDollarSign className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 flex-shrink-0" />
               <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-xs">
-                {estimatedToll > 0 ? formatINR(estimatedToll) : "Toll Free"}
+                {estimatedToll > 0 ? formatINR(estimatedToll) : (tollStatus || "Toll Free")}
               </span>
             </div>
 
