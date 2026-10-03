@@ -96002,19 +96002,21 @@ function decodeGooglePolyline(encoded) {
   }
   return points;
 }
-async function searchPlaces(input2) {
+async function searchPlaces(input2, bias) {
   const q = input2.trim();
   if (!q || q.length < 2) return [];
-  const cacheKey = q.toLowerCase();
+  const biasKey = bias ? `@${bias.lat.toFixed(2)},${bias.lng.toFixed(2)}` : "";
+  const cacheKey = q.toLowerCase() + biasKey;
   const cached2 = autocompleteCache.get(cacheKey);
   if (cached2 && cached2.expiresAt > Date.now()) {
     return cached2.data;
   }
   if (GOOGLE_API_KEY) {
     try {
+      const locationBias = bias ? `&location=${bias.lat},${bias.lng}&radius=100000` : "";
       const url2 = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
         q
-      )}&components=country:in&key=${GOOGLE_API_KEY}`;
+      )}&components=country:in${locationBias}&key=${GOOGLE_API_KEY}`;
       const res = await fetch(url2);
       if (res.ok) {
         const json3 = await res.json();
@@ -96068,9 +96070,10 @@ async function searchPlaces(input2) {
     }
   }
   try {
+    const proximityBias = bias ? `&bias=proximity:${bias.lng},${bias.lat}` : "";
     const url2 = `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(
       q
-    )}&apiKey=${GEOAPIFY_API_KEY}&countrycode=in`;
+    )}&apiKey=${GEOAPIFY_API_KEY}&countrycode=in${proximityBias}`;
     const res = await fetch(url2);
     if (res.ok) {
       const data = await res.json();
@@ -96405,7 +96408,7 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
   const isRoundTrip = tripType.toLowerCase().includes("round");
   for (const stop of stops) {
     if ((!stop.latitude || !stop.longitude) && (stop.address || stop.name)) {
-      const found = await searchPlaces(stop.address || stop.name);
+      const found = await searchPlaces(stop.address || stop.name, { lat: pLat, lng: pLng });
       if (found.length > 0) {
         stop.latitude = found[0].latitude;
         stop.longitude = found[0].longitude;
@@ -97991,7 +97994,10 @@ router2.get("/maps/places/autocomplete", async (req, res) => {
       res.json([]);
       return;
     }
-    const results = await searchPlaces(q);
+    const biasLat = Number(req.query.biasLat);
+    const biasLng = Number(req.query.biasLng);
+    const bias = Number.isFinite(biasLat) && Number.isFinite(biasLng) ? { lat: biasLat, lng: biasLng } : void 0;
+    const results = await searchPlaces(q, bias);
     res.json(results);
   } catch (err) {
     console.error("[maps/places/autocomplete] Error:", err);
@@ -99240,13 +99246,13 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 13,
-  versionName: "1.3.5",
+  versionCode: 14,
+  versionName: "1.3.6",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Fixes the Download Update button: the APK now downloads in Chrome instead of getting stuck at 100% inside the app. Includes everything from 1.3.4 (stand-to-stand KM tracking, delete for customers/vehicles/drivers, Route Planner prefill and booking fixes)."
+  releaseNotes: "Route Planner: live place-suggestions for intermediate waypoints, per-leg (outbound/return) waypoint routing for asymmetric round trips, and corrected toll pricing that now checks both legs independently instead of only the outbound path."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
