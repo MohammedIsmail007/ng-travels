@@ -1208,6 +1208,7 @@ function MainApp() {
   const [driverKmTrip, setDriverKmTrip] = useState<{
     trip: any;
     mode: "start" | "end" | "stand";
+    ops?: boolean;
   } | null>(null);
   const [driverExpenseTripId, setDriverExpenseTripId] = useState<number | null>(
     null,
@@ -1830,7 +1831,7 @@ function MainApp() {
                     onOpenEditTrip={(trip) => setEditingTrip(trip)}
                     onOpenAssignDriver={(trip) => setAssignDriverTrip(trip)}
                     onOpenStartKmModal={(trip) => setDriverKmTrip({ trip, mode: "start" })}
-                    onOpenEndKmModal={(trip) => setDriverKmTrip({ trip, mode: "end" })}
+                    onOpenEndKmModal={(trip) => setDriverKmTrip({ trip, mode: "end", ops: true })}
                     onOpenStandKmModal={(trip) => setDriverKmTrip({ trip, mode: "stand" })}
                     onUpdateMilestone={handleDriverMilestone}
                     onOpenExpenseModal={(tripId) => setDriverExpenseTripId(tripId)}
@@ -2025,6 +2026,7 @@ function MainApp() {
           onClose={() => setDriverKmTrip(null)}
           trip={driverKmTrip.trip}
           mode={driverKmTrip.mode}
+          ops={driverKmTrip.ops}
           onSuccess={async () => {
             await Promise.all([
               qc.invalidateQueries({ queryKey: ["/api/trips"] }),

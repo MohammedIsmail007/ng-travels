@@ -408,6 +408,26 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
             </div>
           )}
 
+          {trip.status === "completed" && (
+            <div className="bg-card/70 p-5 rounded-xl border border-border flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-amber-700 dark:text-amber-400" /> Trip Billing
+                </h2>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Billable KM is the pickup → drop odometer distance ({Number(trip.actualKm || 0)} KM). Edit rate, extras, discount and commission.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => onOpenEndKmModal(trip)}
+                className="h-8 text-xs bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold shrink-0"
+              >
+                Edit Billing
+              </Button>
+            </div>
+          )}
+
           {/* Payments Ledger for this Trip */}
           <div className="bg-card/70 p-5 rounded-xl border border-border space-y-3">
             <div className="flex justify-between items-center">
@@ -540,7 +560,9 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
 
         {/* Right Financial Breakdown Sidebar */}
         <div className="space-y-6">
-          {/* Central Financial Summary Card */}
+          {/* Central Financial Summary Card — only once the Ending KM and the
+              billing values have been recorded at trip completion. */}
+          {(trip.status === "completed" || trip.endingKm != null) && (
           <div className="bg-card/80 p-5 rounded-xl border border-border space-y-4 shadow-xl">
             <h2 className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
               Central Fare & Financial Summary
@@ -579,6 +601,18 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
                 <span className="text-muted-foreground">State Permit Charges</span>
                 <span className="font-mono text-foreground">{formatINR(trip.permitCharge)}</span>
               </div>
+              {Number(trip.waitingCharge || 0) > 0 && (
+                <div className="flex justify-between py-1.5">
+                  <span className="text-muted-foreground">Waiting Charges</span>
+                  <span className="font-mono text-foreground">{formatINR(trip.waitingCharge)}</span>
+                </div>
+              )}
+              {Number(trip.discount || 0) > 0 && (
+                <div className="flex justify-between py-1.5 text-rose-700 dark:text-rose-400">
+                  <span>Discount</span>
+                  <span className="font-mono">-{formatINR(trip.discount)}</span>
+                </div>
+              )}
 
               {/* Customer Total */}
               <div className="flex justify-between pt-3 pb-1 border-t-2 border-border">
@@ -619,6 +653,7 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
               </div>
             </div>
           </div>
+          )}
 
           {/* Passenger Information */}
           <div className="bg-card/70 p-5 rounded-xl border border-border space-y-3 text-xs">

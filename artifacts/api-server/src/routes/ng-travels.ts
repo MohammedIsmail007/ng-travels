@@ -257,6 +257,8 @@ function tripView(
     driverCommissionAmount: numeric(trip.driverCommissionAmount),
     toll: numeric(trip.finalToll ?? trip.toll),
     parking: numeric(trip.parking),
+    waitingCharge: numeric(trip.waitingCharge),
+    discount: numeric(trip.discount),
     permitCharge: numeric(trip.permitCharge),
     customerTotal: numeric(trip.customerTotal),
     totalPaid: numeric(trip.totalPaid),
@@ -2546,7 +2548,16 @@ router.post("/driver/trips/:id/milestone", async (req, res): Promise<void> => {
  */
 router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const { endingKm, location, photoUrl, finalToll, parking } = req.body;
+  const { endingKm, location, photoUrl, finalToll, parking, waitingCharge, returnDate } = req.body;
+  // Ops completes the trip with the commercial figures; drivers may only
+  // supply toll / parking / waiting / return date, whatever else is sent.
+  const viewer = await viewerFor(req).catch(() => null);
+  const isOps = viewer != null && viewer.role !== "driver";
+  const {
+    ratePerKm: ratePerKmInput, pricingMode: pricingModeInput, packageTotal: packageTotalInput, discount,
+    driverCommissionType: commissionTypeInput, driverCommissionValue: commissionValueInput,
+  } = isOps ? req.body : ({} as Record<string, any>);
+  const opsBilling = ratePerKmInput != null;
 
   try {
     const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
@@ -2570,14 +2581,21 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
     const permitAmount = numeric(trip.permitCharge);
 
     // Bill whichever is higher: actual meter km or agreed billing km
-    const chargedKm = Math.max(actualKm, numeric(trip.billingKm));
-    const ratePerKm = numeric(trip.ratePerKm);
+    // Billable distance is always the odometer distance, start → end
+    const chargedKm = actualKm;
+    const ratePerKm = opsBilling ? numeric(ratePerKmInput) : numeric(trip.ratePerKm);
+    const waitingAmount = waitingCharge != null ? numeric(waitingCharge) : numeric(trip.waitingCharge);
+    const discountAmount = discount != null ? numeric(discount) : numeric(trip.discount);
+    const commissionType = commissionTypeInput === "flat" || commissionTypeInput === "percentage" ? commissionTypeInput : trip.driverCommissionType;
+    const commissionValue = commissionValueInput != null ? numeric(commissionValueInput) : numeric(trip.driverCommissionValue);
     // A flat package trip keeps its agreed total regardless of actual meter
     // KM — only per-km trips get their base fare recalculated off the road.
-    const recalculatedBase = trip.pricingMode === "package"
-      ? numeric(trip.baseFare)
+    const pricingMode = opsBilling && pricingModeInput ? pricingModeInput : trip.pricingMode;
+    const packageAmount = opsBilling && packageTotalInput != null ? numeric(packageTotalInput) : numeric(trip.packageTotal);
+    const recalculatedBase = pricingMode === "package"
+      ? (opsBilling ? packageAmount : numeric(trip.baseFare))
       : Math.round(chargedKm * ratePerKm * 100) / 100;
-    const customerTotal = Math.round((recalculatedBase + tollAmount + parkingAmount + permitAmount) * 100) / 100;
+    const customerTotal = Math.round((recalculatedBase + tollAmount + parkingAmount + permitAmount + waitingAmount - discountAmount) * 100) / 100;
     const totalPaid = numeric(trip.totalPaid);
     const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
     const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
@@ -2585,9 +2603,9 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
     // A flat commission stays fixed regardless of the final fare; a
     // percentage commission is re-derived off the recalculated customer
     // total so it reflects what actually got charged, not the estimate.
-    const driverCommissionAmount = trip.driverCommissionType === "flat"
-      ? numeric(trip.driverCommissionValue)
-      : Math.round(customerTotal * (numeric(trip.driverCommissionValue) / 100) * 100) / 100;
+    const driverCommissionAmount = commissionType === "flat"
+      ? commissionValue
+      : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
 
     const [completed] = await db
       .update(tripsTable)
@@ -2601,6 +2619,13 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
         finalToll: String(tollAmount),
         toll: String(tollAmount),
         parking: String(parkingAmount),
+        ratePerKm: String(ratePerKm),
+        ...(opsBilling ? { pricingMode, packageTotal: pricingMode === "package" ? String(packageAmount) : null } : {}),
+        waitingCharge: String(waitingAmount),
+        discount: String(discountAmount),
+        driverCommissionType: commissionType,
+        driverCommissionValue: String(commissionValue),
+        ...(returnDate ? { returnDate: String(returnDate).slice(0, 10) } : {}),
         customerTotal: String(customerTotal),
         remainingBalance: String(remainingBalance),
         credit: String(credit),
@@ -2735,6 +2760,92 @@ router.post("/trips/:id/stand-return", async (req, res): Promise<void> => {
   } catch (err: any) {
     console.error("[trips/stand-return] Error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
+  }
+});
+
+/**
+ * Ops edits the commercial figures of a trip after it has ended. The billable
+ * distance is not an input — it is the recorded pickup → drop odometer
+ * distance (actualKm); everything else is taken as entered.
+ */
+router.post("/trips/:id/billing", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  try {
+    const viewer = await viewerFor(req);
+    if (!viewer) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Please sign in again." } });
+      return;
+    }
+    if (viewer.role === "driver") {
+      res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "Only operations staff can edit billing." } });
+      return;
+    }
+
+    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    if (!trip) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
+      return;
+    }
+    if (trip.status !== "completed") {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Billing can be edited once the trip has ended." } });
+      return;
+    }
+
+    const b = req.body;
+    const pricingMode = b.pricingMode === "package" ? "package" : "per_km";
+    const actualKm = numeric(trip.actualKm);
+    const ratePerKm = b.ratePerKm != null ? numeric(b.ratePerKm) : numeric(trip.ratePerKm);
+    const packageAmount = b.packageTotal != null ? numeric(b.packageTotal) : numeric(trip.packageTotal);
+    const parkingAmount = b.parking != null ? numeric(b.parking) : numeric(trip.parking);
+    const waitingAmount = b.waitingCharge != null ? numeric(b.waitingCharge) : numeric(trip.waitingCharge);
+    const discountAmount = b.discount != null ? numeric(b.discount) : numeric(trip.discount);
+    const commissionType = b.driverCommissionType === "flat" ? "flat" : "percentage";
+    const commissionValue = b.driverCommissionValue != null ? numeric(b.driverCommissionValue) : numeric(trip.driverCommissionValue);
+
+    const baseFare = pricingMode === "package"
+      ? packageAmount
+      : Math.round(actualKm * ratePerKm * 100) / 100;
+    const customerTotal = Math.round(
+      (baseFare + numeric(trip.finalToll) + parkingAmount + numeric(trip.permitCharge) + waitingAmount - discountAmount) * 100,
+    ) / 100;
+    const totalPaid = numeric(trip.totalPaid);
+    const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
+    const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
+    const driverCommissionAmount = commissionType === "flat"
+      ? commissionValue
+      : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
+
+    const [updated] = await db
+      .update(tripsTable)
+      .set({
+        pricingMode,
+        packageTotal: pricingMode === "package" ? String(packageAmount) : null,
+        ratePerKm: String(ratePerKm),
+        billingKm: String(actualKm),
+        baseFare: String(baseFare),
+        parking: String(parkingAmount),
+        waitingCharge: String(waitingAmount),
+        discount: String(discountAmount),
+        driverCommissionType: commissionType,
+        driverCommissionValue: String(commissionValue),
+        driverCommissionAmount: String(driverCommissionAmount),
+        ...(b.returnDate ? { returnDate: String(b.returnDate).slice(0, 10) } : {}),
+        customerTotal: String(customerTotal),
+        remainingBalance: String(remainingBalance),
+        credit: String(credit),
+        updatedAt: new Date(),
+      })
+      .where(eq(tripsTable.id, id))
+      .returning();
+
+    await writeAudit(req, `Edited billing for ${trip.bookingId} (total ${customerTotal})`, "trip", id);
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, updated.customerId));
+    const view = tripView(updated, customer);
+    broadcastRealtimeEvent("TRIP_UPDATED", view);
+    res.json(view);
+  } catch (err: any) {
+    console.error("[trips/billing] Error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to update billing" } });
   }
 });
 

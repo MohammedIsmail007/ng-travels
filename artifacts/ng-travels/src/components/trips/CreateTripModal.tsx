@@ -659,20 +659,8 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
         alert("Please upload a photo of the odometer reading");
         return;
       }
-      if (distanceKm <= 0) {
-        const proceed = confirm("Road Distance is currently 0 KM. Would you like to enter a distance in KM now?");
-        if (proceed) return;
-      }
     }
     if (step === 4) {
-      if (pricingMode === "package" && packageTotal <= 0) {
-        alert("Please enter the total package amount");
-        return;
-      }
-      if (pricingMode === "per_km" && ratePerKm <= 0) {
-        alert("Please enter a rate per KM");
-        return;
-      }
     }
     setStep((prev) => Math.min(prev + 1, 5));
   };
@@ -1151,27 +1139,6 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                       </div>
                     </div>
 
-                    {isRound && (
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-purple-700 dark:text-purple-400" /> Return Date & Time *
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Input
-                            type="date"
-                            value={returnDate}
-                            onChange={(e) => setReturnDate(e.target.value)}
-                            className="bg-card border-border text-xs h-9"
-                          />
-                          <Input
-                            type="time"
-                            value={returnTime}
-                            onChange={(e) => setReturnTime(e.target.value)}
-                            className="bg-card border-border text-xs h-9"
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -1452,44 +1419,11 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                 <div className="bg-card/60 p-4 rounded-xl border border-amber-300 dark:border-amber-500/40 bg-amber-950/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                      <Calculator className="w-4 h-4" /> Road Distance & Billable Volume
-                    </span>
-                    <span className="text-[11px] font-mono text-muted-foreground">
-                      Minimum Billable: {commercialFare.minimumBillableKm} KM
+                      <Calculator className="w-4 h-4" /> Toll
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-[11px] text-foreground block mb-1">
-                        Total Road Distance (KM) *
-                      </label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={distanceKm || ""}
-                        onChange={(e) => {
-                          // The billable-KM calc actually derives its total from
-                          // outboundKm + returnKm, not from this field directly —
-                          // so a manual edit here has to clear those stale
-                          // auto-estimated halves too, or they silently override
-                          // whatever the user just typed.
-                          setDistanceKm(Math.max(0, Number(e.target.value)));
-                          setOutboundKm(0);
-                          setReturnKm(0);
-                        }}
-                        placeholder="e.g. 350"
-                        className="bg-card border-border text-sm h-10 font-mono font-bold text-amber-700 dark:text-amber-400 placeholder:text-muted-foreground"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-muted-foreground block mb-1">
-                        Effective Billable KM
-                      </label>
-                      <div className="h-10 px-3 flex items-center font-mono font-bold text-sm bg-background border border-border rounded-md text-emerald-700 dark:text-emerald-400">
-                        {commercialFare.totalBillableDistance} KM
-                      </div>
-                    </div>
+                  <div className="grid grid-cols-1 gap-3">
                     <div>
                       <label className="text-[11px] text-muted-foreground block mb-1">
                         Toll Charge (₹)
@@ -1601,57 +1535,16 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Left Column: Editable Rates & Surcharges */}
+                <div className="grid grid-cols-1 gap-4">
+                  {/* Editable Rates & Surcharges */}
                   <div className="space-y-3 bg-card/50 p-4 rounded-xl border border-border text-xs">
                     <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">
                       Commercial Rate Parameters
                     </span>
 
-                    {/* Pricing Mode Switch: Rate per KM vs flat Total Package Rate */}
-                    <div className="flex items-center justify-between bg-background/70 border border-border rounded-lg px-3 py-2.5">
-                      <div>
-                        <span className={`text-[11px] font-bold ${pricingMode === "per_km" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
-                          Rate per KM
-                        </span>
-                        <span className="text-[10px] text-muted-foreground mx-1.5">/</span>
-                        <span className={`text-[11px] font-bold ${pricingMode === "package" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
-                          Total Package Rate
-                        </span>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {pricingMode === "package"
-                            ? "Flat package amount — toll/parking/tax still apply on top."
-                            : "Fare computed from billable KM × rate, with day-minimum enforcement."}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={pricingMode === "package"}
-                        onCheckedChange={(checked) => setPricingMode(checked ? "package" : "per_km")}
-                      />
-                    </div>
-
-                    {pricingMode === "package" ? (
-                      <div>
-                        <label className="text-[11px] text-foreground block mb-1">Total Package Amount (₹) *</label>
-                        <Input
-                          type="number"
-                          value={packageTotal || ""}
-                          onChange={(e) => setPackageTotal(Number(e.target.value))}
-                          placeholder="e.g. 12000"
-                          className="bg-card border-border text-xs h-9 font-mono font-bold text-amber-700 dark:text-amber-400 placeholder:text-muted-foreground"
-                        />
-                      </div>
-                    ) : (
-                      <div>
-                        <label className="text-[11px] text-foreground block mb-1">Rate Per KM (₹) *</label>
-                        <Input
-                          type="number"
-                          value={ratePerKm || ""}
-                          onChange={(e) => setRatePerKm(Number(e.target.value))}
-                          className="bg-card border-border text-xs h-9 font-mono font-bold text-amber-700 dark:text-amber-400"
-                        />
-                      </div>
-                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      Pricing (rate per KM / total package), parking, waiting, discount and commission are entered when the trip is completed (Ending KM).
+                    </p>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -1672,127 +1565,6 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                           className="bg-card border-border text-xs h-9 font-mono"
                         />
                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground block mb-1">Parking (₹)</label>
-                        <Input
-                          type="number"
-                          value={parking || ""}
-                          onChange={(e) => setParking(Number(e.target.value))}
-                          className="bg-card border-border text-xs h-8 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground block mb-1">Waiting (₹)</label>
-                        <Input
-                          type="number"
-                          value={waitingCharge || ""}
-                          onChange={(e) => setWaitingCharge(Number(e.target.value))}
-                          className="bg-card border-border text-xs h-8 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground block mb-1">Discount (₹)</label>
-                        <Input
-                          type="number"
-                          value={discount || ""}
-                          onChange={(e) => setDiscount(Number(e.target.value))}
-                          className="bg-card border-border text-xs h-8 font-mono text-rose-700 dark:text-rose-400"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Driver Commission — internal ops figure, never shown
-                        to the customer and never affects Customer Total Fare. */}
-                    <div className="pt-1 border-t border-border/80 space-y-3">
-                      <div className="flex items-center justify-between bg-background/70 border border-border rounded-lg px-3 py-2.5">
-                        <div>
-                          <span className={`text-[11px] font-bold ${driverCommissionType === "percentage" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
-                            Commission %
-                          </span>
-                          <span className="text-[10px] text-muted-foreground mx-1.5">/</span>
-                          <span className={`text-[11px] font-bold ${driverCommissionType === "flat" ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
-                            Flat Value
-                          </span>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">Driver Commission (internal — not billed to customer)</p>
-                        </div>
-                        <Switch
-                          checked={driverCommissionType === "flat"}
-                          onCheckedChange={(checked) => setDriverCommissionType(checked ? "flat" : "percentage")}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-[11px] text-foreground block mb-1">
-                          {driverCommissionType === "flat" ? "Commission Amount (₹)" : "Commission (% of Customer Total)"}
-                        </label>
-                        <Input
-                          type="number"
-                          value={driverCommissionValue || ""}
-                          onChange={(e) => setDriverCommissionValue(Math.max(0, Number(e.target.value)))}
-                          placeholder={driverCommissionType === "flat" ? "e.g. 500" : "e.g. 10"}
-                          className="bg-card border-border text-xs h-9 font-mono font-bold text-foreground placeholder:text-muted-foreground"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Column: Live Itemized Fare Ledger */}
-                  <div className="bg-card/80 border border-border rounded-xl p-4 flex flex-col justify-between text-xs space-y-3">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center border-b border-border pb-2">
-                        <span className="font-bold text-foreground">
-                          {pricingMode === "package" ? "Package Basis:" : "Billable Volume:"}
-                        </span>
-                        <span className="font-mono text-foreground">
-                          {pricingMode === "package"
-                            ? `Flat total (${commercialFare.totalBillableDistance} KM travelled)`
-                            : `${commercialFare.totalBillableDistance} KM @ ₹${ratePerKm}/km`}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center text-muted-foreground">
-                        <span>{pricingMode === "package" ? "Package Fare:" : "Base Distance Fare:"}</span>
-                        <span className="font-mono text-foreground">{formatINR(baseFare)}</span>
-                      </div>
-                      {(finalToll > 0 || permitCharge > 0) && (
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Toll & Permit:</span>
-                          <span className="font-mono text-foreground">{formatINR(finalToll + permitCharge)}</span>
-                        </div>
-                      )}
-                      {(parking > 0 || waitingCharge > 0) && (
-                        <div className="flex justify-between items-center text-muted-foreground">
-                          <span>Parking & Waiting:</span>
-                          <span className="font-mono text-foreground">{formatINR(parking + waitingCharge)}</span>
-                        </div>
-                      )}
-                      {discount > 0 && (
-                        <div className="flex justify-between items-center text-rose-700 dark:text-rose-400">
-                          <span>Discount Applied:</span>
-                          <span className="font-mono">- {formatINR(discount)}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-3 border-t border-border space-y-2">
-                      <div className="flex justify-between items-center text-muted-foreground">
-                        <span>Subtotal:</span>
-                        <span className="font-mono font-bold text-foreground">{formatINR(commercialFare.subtotal)}</span>
-                      </div>
-                      <div className="flex justify-between items-center bg-background p-3 rounded-lg border border-amber-300 dark:border-amber-500/30">
-                        <span className="font-black text-xs text-amber-700 dark:text-amber-400 uppercase">Customer Total Fare:</span>
-                        <span className="text-xl font-black font-mono text-emerald-700 dark:text-emerald-400">{formatINR(customerTotal)}</span>
-                      </div>
-                      {driverCommissionValue > 0 && (
-                        <div className="flex justify-between items-center bg-purple-950/10 p-2.5 rounded-lg border border-purple-300 dark:border-purple-500/30">
-                          <span className="text-[11px] font-bold text-purple-700 dark:text-purple-400 uppercase">
-                            Driver Commission {driverCommissionType === "percentage" ? `(${driverCommissionValue}%)` : "(Flat)"}:
-                          </span>
-                          <span className="font-mono font-bold text-purple-700 dark:text-purple-300">{formatINR(driverCommissionAmount)}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1898,17 +1670,10 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                   </p>
                 )}
 
-                <div className="flex justify-between items-center p-3.5 rounded-xl bg-card border border-border text-xs font-mono">
-                  <div>
-                    <span className="text-muted-foreground block">Total Fare: {formatINR(customerTotal)}</span>
-                    <span className="text-emerald-700 dark:text-emerald-400 block">
-                      {isEditing ? "Already Paid" : "Advance Paid"}: {formatINR(totalPaidForCalc)}
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-muted-foreground text-[10px] block uppercase">Remaining Balance Due</span>
-                    <span className="text-amber-700 dark:text-amber-300 font-bold text-base">{formatINR(remainingBalance)}</span>
-                  </div>
+                <div className="p-3.5 rounded-xl bg-card border border-border text-xs font-mono">
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    {isEditing ? "Already Paid" : "Advance Paid"}: {formatINR(totalPaidForCalc)}
+                  </span>
                 </div>
 
                 {/* Final Route & Schedule Summary */}
@@ -1918,7 +1683,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                     <span>{pickupInput} ➔ {destInput}</span>
                   </div>
                   <div className="text-muted-foreground text-[11px]">
-                    {startDate} at {startTime} • {tripType.replaceAll("_", " ")} • {commercialFare.totalBillableDistance} Billable KM
+                    {startDate} at {startTime} • {tripType.replaceAll("_", " ")}
                   </div>
                 </div>
               </div>

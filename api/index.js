@@ -96002,21 +96002,19 @@ function decodeGooglePolyline(encoded) {
   }
   return points;
 }
-async function searchPlaces(input2, bias) {
+async function searchPlaces(input2) {
   const q = input2.trim();
   if (!q || q.length < 2) return [];
-  const biasKey = bias ? `@${bias.lat.toFixed(2)},${bias.lng.toFixed(2)}` : "";
-  const cacheKey = q.toLowerCase() + biasKey;
+  const cacheKey = q.toLowerCase();
   const cached2 = autocompleteCache.get(cacheKey);
   if (cached2 && cached2.expiresAt > Date.now()) {
     return cached2.data;
   }
   if (GOOGLE_API_KEY) {
     try {
-      const locationBias = bias ? `&location=${bias.lat},${bias.lng}&radius=100000` : "";
       const url2 = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
         q
-      )}&components=country:in${locationBias}&key=${GOOGLE_API_KEY}`;
+      )}&components=country:in&key=${GOOGLE_API_KEY}`;
       const res = await fetch(url2);
       if (res.ok) {
         const json3 = await res.json();
@@ -96070,10 +96068,9 @@ async function searchPlaces(input2, bias) {
     }
   }
   try {
-    const proximityBias = bias ? `&bias=proximity:${bias.lng},${bias.lat}` : "";
     const url2 = `https://api.geoapify.com/v1/geocode/autocomplete?text=${encodeURIComponent(
       q
-    )}&apiKey=${GEOAPIFY_API_KEY}&countrycode=in${proximityBias}`;
+    )}&apiKey=${GEOAPIFY_API_KEY}&countrycode=in`;
     const res = await fetch(url2);
     if (res.ok) {
       const data = await res.json();
@@ -96408,7 +96405,7 @@ async function calculateRouteJourney(pickupOrOptions, destinationParam, stopsPar
   const isRoundTrip = tripType.toLowerCase().includes("round");
   for (const stop of stops) {
     if ((!stop.latitude || !stop.longitude) && (stop.address || stop.name)) {
-      const found = await searchPlaces(stop.address || stop.name, { lat: pLat, lng: pLng });
+      const found = await searchPlaces(stop.address || stop.name);
       if (found.length > 0) {
         stop.latitude = found[0].latitude;
         stop.longitude = found[0].longitude;
@@ -97029,6 +97026,8 @@ function tripView(trip, customer) {
     driverCommissionAmount: numeric2(trip.driverCommissionAmount),
     toll: numeric2(trip.finalToll ?? trip.toll),
     parking: numeric2(trip.parking),
+    waitingCharge: numeric2(trip.waitingCharge),
+    discount: numeric2(trip.discount),
     permitCharge: numeric2(trip.permitCharge),
     customerTotal: numeric2(trip.customerTotal),
     totalPaid: numeric2(trip.totalPaid),
@@ -97994,10 +97993,7 @@ router2.get("/maps/places/autocomplete", async (req, res) => {
       res.json([]);
       return;
     }
-    const biasLat = Number(req.query.biasLat);
-    const biasLng = Number(req.query.biasLng);
-    const bias = Number.isFinite(biasLat) && Number.isFinite(biasLng) ? { lat: biasLat, lng: biasLng } : void 0;
-    const results = await searchPlaces(q, bias);
+    const results = await searchPlaces(q);
     res.json(results);
   } catch (err) {
     console.error("[maps/places/autocomplete] Error:", err);
@@ -98740,7 +98736,18 @@ router2.post("/driver/trips/:id/milestone", async (req, res) => {
 });
 router2.post("/driver/trips/:id/complete", async (req, res) => {
   const id = Number(req.params.id);
-  const { endingKm, location: location2, photoUrl, finalToll, parking } = req.body;
+  const { endingKm, location: location2, photoUrl, finalToll, parking, waitingCharge, returnDate } = req.body;
+  const viewer = await viewerFor(req).catch(() => null);
+  const isOps = viewer != null && viewer.role !== "driver";
+  const {
+    ratePerKm: ratePerKmInput,
+    pricingMode: pricingModeInput,
+    packageTotal: packageTotalInput,
+    discount,
+    driverCommissionType: commissionTypeInput,
+    driverCommissionValue: commissionValueInput
+  } = isOps ? req.body : {};
+  const opsBilling = ratePerKmInput != null;
   try {
     const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
     if (!trip) {
@@ -98758,14 +98765,20 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
     const tollAmount = finalToll != null ? numeric2(finalToll) : numeric2(trip.finalToll);
     const parkingAmount = parking != null ? numeric2(parking) : numeric2(trip.parking);
     const permitAmount = numeric2(trip.permitCharge);
-    const chargedKm = Math.max(actualKm, numeric2(trip.billingKm));
-    const ratePerKm = numeric2(trip.ratePerKm);
-    const recalculatedBase = trip.pricingMode === "package" ? numeric2(trip.baseFare) : Math.round(chargedKm * ratePerKm * 100) / 100;
-    const customerTotal = Math.round((recalculatedBase + tollAmount + parkingAmount + permitAmount) * 100) / 100;
+    const chargedKm = actualKm;
+    const ratePerKm = opsBilling ? numeric2(ratePerKmInput) : numeric2(trip.ratePerKm);
+    const waitingAmount = waitingCharge != null ? numeric2(waitingCharge) : numeric2(trip.waitingCharge);
+    const discountAmount = discount != null ? numeric2(discount) : numeric2(trip.discount);
+    const commissionType = commissionTypeInput === "flat" || commissionTypeInput === "percentage" ? commissionTypeInput : trip.driverCommissionType;
+    const commissionValue = commissionValueInput != null ? numeric2(commissionValueInput) : numeric2(trip.driverCommissionValue);
+    const pricingMode = opsBilling && pricingModeInput ? pricingModeInput : trip.pricingMode;
+    const packageAmount = opsBilling && packageTotalInput != null ? numeric2(packageTotalInput) : numeric2(trip.packageTotal);
+    const recalculatedBase = pricingMode === "package" ? opsBilling ? packageAmount : numeric2(trip.baseFare) : Math.round(chargedKm * ratePerKm * 100) / 100;
+    const customerTotal = Math.round((recalculatedBase + tollAmount + parkingAmount + permitAmount + waitingAmount - discountAmount) * 100) / 100;
     const totalPaid = numeric2(trip.totalPaid);
     const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
     const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
-    const driverCommissionAmount = trip.driverCommissionType === "flat" ? numeric2(trip.driverCommissionValue) : Math.round(customerTotal * (numeric2(trip.driverCommissionValue) / 100) * 100) / 100;
+    const driverCommissionAmount = commissionType === "flat" ? commissionValue : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
     const [completed] = await db.update(tripsTable).set({
       status: "completed",
       endingKm: String(endKm),
@@ -98776,6 +98789,13 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
       finalToll: String(tollAmount),
       toll: String(tollAmount),
       parking: String(parkingAmount),
+      ratePerKm: String(ratePerKm),
+      ...opsBilling ? { pricingMode, packageTotal: pricingMode === "package" ? String(packageAmount) : null } : {},
+      waitingCharge: String(waitingAmount),
+      discount: String(discountAmount),
+      driverCommissionType: commissionType,
+      driverCommissionValue: String(commissionValue),
+      ...returnDate ? { returnDate: String(returnDate).slice(0, 10) } : {},
       customerTotal: String(customerTotal),
       remainingBalance: String(remainingBalance),
       credit: String(credit),
@@ -98874,6 +98894,73 @@ router2.post("/trips/:id/stand-return", async (req, res) => {
   } catch (err) {
     console.error("[trips/stand-return] Error:", err);
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
+  }
+});
+router2.post("/trips/:id/billing", async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const viewer = await viewerFor(req);
+    if (!viewer) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Please sign in again." } });
+      return;
+    }
+    if (viewer.role === "driver") {
+      res.status(403).json({ success: false, error: { code: "FORBIDDEN", message: "Only operations staff can edit billing." } });
+      return;
+    }
+    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    if (!trip) {
+      res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
+      return;
+    }
+    if (trip.status !== "completed") {
+      res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Billing can be edited once the trip has ended." } });
+      return;
+    }
+    const b = req.body;
+    const pricingMode = b.pricingMode === "package" ? "package" : "per_km";
+    const actualKm = numeric2(trip.actualKm);
+    const ratePerKm = b.ratePerKm != null ? numeric2(b.ratePerKm) : numeric2(trip.ratePerKm);
+    const packageAmount = b.packageTotal != null ? numeric2(b.packageTotal) : numeric2(trip.packageTotal);
+    const parkingAmount = b.parking != null ? numeric2(b.parking) : numeric2(trip.parking);
+    const waitingAmount = b.waitingCharge != null ? numeric2(b.waitingCharge) : numeric2(trip.waitingCharge);
+    const discountAmount = b.discount != null ? numeric2(b.discount) : numeric2(trip.discount);
+    const commissionType = b.driverCommissionType === "flat" ? "flat" : "percentage";
+    const commissionValue = b.driverCommissionValue != null ? numeric2(b.driverCommissionValue) : numeric2(trip.driverCommissionValue);
+    const baseFare = pricingMode === "package" ? packageAmount : Math.round(actualKm * ratePerKm * 100) / 100;
+    const customerTotal = Math.round(
+      (baseFare + numeric2(trip.finalToll) + parkingAmount + numeric2(trip.permitCharge) + waitingAmount - discountAmount) * 100
+    ) / 100;
+    const totalPaid = numeric2(trip.totalPaid);
+    const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
+    const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
+    const driverCommissionAmount = commissionType === "flat" ? commissionValue : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
+    const [updated] = await db.update(tripsTable).set({
+      pricingMode,
+      packageTotal: pricingMode === "package" ? String(packageAmount) : null,
+      ratePerKm: String(ratePerKm),
+      billingKm: String(actualKm),
+      baseFare: String(baseFare),
+      parking: String(parkingAmount),
+      waitingCharge: String(waitingAmount),
+      discount: String(discountAmount),
+      driverCommissionType: commissionType,
+      driverCommissionValue: String(commissionValue),
+      driverCommissionAmount: String(driverCommissionAmount),
+      ...b.returnDate ? { returnDate: String(b.returnDate).slice(0, 10) } : {},
+      customerTotal: String(customerTotal),
+      remainingBalance: String(remainingBalance),
+      credit: String(credit),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(tripsTable.id, id)).returning();
+    await writeAudit(req, `Edited billing for ${trip.bookingId} (total ${customerTotal})`, "trip", id);
+    const [customer] = await db.select().from(customersTable).where(eq(customersTable.id, updated.customerId));
+    const view = tripView(updated, customer);
+    broadcastRealtimeEvent("TRIP_UPDATED", view);
+    res.json(view);
+  } catch (err) {
+    console.error("[trips/billing] Error:", err);
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to update billing" } });
   }
 });
 router2.post("/driver/trips/:id/location", async (req, res) => {
