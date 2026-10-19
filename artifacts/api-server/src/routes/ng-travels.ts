@@ -956,13 +956,31 @@ router.get("/dashboard", requireOwner, async (_req, res): Promise<void> => {
   const monthStart = startOfMonth(currentDay);
 
   try {
-    const allTrips = await db.select().from(tripsTable);
-    const approvedExpenses = await db.select().from(tripExpensesTable).where(eq(tripExpensesTable.status, "approved"));
-    const allDrivers = await db.select().from(driversTable);
-    const allVehicles = await db.select().from(vehiclesTable);
+    // Only the columns the metrics read — the full rows (route JSON, notes,
+    // fare breakdowns) made this endpoint pull the entire trips table on
+    // every dashboard refresh.
+    const allTrips = await db
+      .select({
+        id: tripsTable.id,
+        startDate: tripsTable.startDate,
+        status: tripsTable.status,
+        vehicleId: tripsTable.vehicleId,
+        customerTotal: tripsTable.customerTotal,
+        totalPaid: tripsTable.totalPaid,
+        remainingBalance: tripsTable.remainingBalance,
+      })
+      .from(tripsTable);
+    const approvedExpenses = await db
+      .select({ tripId: tripExpensesTable.tripId, amount: tripExpensesTable.amount })
+      .from(tripExpensesTable)
+      .where(eq(tripExpensesTable.status, "approved"));
+    const allDrivers = await db
+      .select({ availability: driversTable.availability, status: driversTable.status })
+      .from(driversTable);
+    const allVehicles = await db.select({ status: vehiclesTable.status }).from(vehiclesTable);
 
     const todayTrips = allTrips.filter((trip) => trip.startDate === currentDay);
-    const inRange = (trip: typeof tripsTable.$inferSelect, from: string) =>
+    const inRange = (trip: (typeof allTrips)[number], from: string) =>
       trip.startDate >= from && trip.startDate <= currentDay;
     const revenue = (trips: typeof allTrips) =>
       trips.reduce((sum, trip) => sum + numeric(trip.customerTotal), 0);
@@ -1719,6 +1737,8 @@ router.get("/trips", async (req, res): Promise<void> => {
     const statusFilter = req.query.status ? String(req.query.status) : undefined;
     const driverIdFilter = req.query.driverId ? Number(req.query.driverId) : undefined;
     const customerIdFilter = req.query.customerId ? Number(req.query.customerId) : undefined;
+    const tripsLimit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    const tripsOffset = Math.max(Number(req.query.offset) || 0, 0);
 
     // Strict role authorization: drivers can ONLY see trips assigned to them
     const effectiveDriverId = viewer?.role === "driver" && viewer.driverId ? viewer.driverId : driverIdFilter;
@@ -1736,9 +1756,16 @@ router.get("/trips", async (req, res): Promise<void> => {
       // Newest bookings first, so a just-dispatched trip is always at the top.
       // (Ordering by start date/time alone left same-day 08:00 trips in an
       // arbitrary order, burying new bookings mid-list.)
-      .orderBy(desc(tripsTable.createdAt), desc(tripsTable.id));
+      .orderBy(desc(tripsTable.createdAt), desc(tripsTable.id))
+      // Honour ?limit/?offset (the client sends limit=100). A text search
+      // filters in memory below, so it needs the full set.
+      .limit(search ? 5000 : tripsLimit)
+      .offset(search ? 0 : tripsOffset);
 
-    const customers = await db.select().from(customersTable);
+    const customerIds = [...new Set(trips.map((t) => t.customerId))];
+    const customers = customerIds.length
+      ? await db.select().from(customersTable).where(inArray(customersTable.id, customerIds))
+      : [];
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
     const tripViews = trips.map((t) =>
@@ -2859,6 +2886,20 @@ router.post("/trips/:id/billing", async (req, res): Promise<void> => {
   }
 });
 
+// GPS pings only matter while a trip is live; keep a week of history and
+// drop the rest so the table (and its indexes) stop growing without bound.
+const LOCATION_RETENTION_DAYS = 7;
+let lastLocationPrune = 0;
+function pruneOldLocations(): void {
+  const now = Date.now();
+  if (now - lastLocationPrune < 6 * 60 * 60 * 1000) return;
+  lastLocationPrune = now;
+  const cutoff = new Date(now - LOCATION_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  db.delete(driverLocationsTable)
+    .where(lte(driverLocationsTable.timestamp, cutoff))
+    .catch((err: any) => console.warn("[location] prune failed:", err?.message));
+}
+
 /**
  * Ingest Real-Time Telemetry & GPS Coordinates
  */
@@ -2872,13 +2913,16 @@ router.post("/driver/trips/:id/location", async (req, res): Promise<void> => {
   }
 
   try {
-    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    // Runs on every GPS ping, so fetch only the one column needed.
+    const [trip] = await db.select({ driverId: tripsTable.driverId }).from(tripsTable).where(eq(tripsTable.id, id));
     if (!trip) {
       res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
       return;
     }
 
     const driverId = trip.driverId || 1;
+
+    pruneOldLocations();
 
     await db.insert(driverLocationsTable).values({
       driverId,
@@ -2944,7 +2988,7 @@ router.get("/trips/:id/live-location", async (req, res): Promise<void> => {
 // =============================================================
 router.get("/payments", async (_req, res): Promise<void> => {
   try {
-    const rows = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.createdAt));
+    const rows = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.createdAt)).limit(500);
     res.json(rows);
   } catch (err: any) {
     console.error("[payments] Database query failed:", err?.message);
@@ -3059,7 +3103,7 @@ router.post("/expenses/upload-receipt", receiptUpload.single("file"), async (req
 
     const { error: uploadError } = await supabaseServer.storage
       .from(EXPENSE_RECEIPTS_BUCKET)
-      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false, cacheControl: "31536000" });
 
     if (uploadError) {
       console.error("[expenses/upload-receipt] Storage upload error:", uploadError);
@@ -3110,7 +3154,7 @@ router.post("/driver/trips/upload-km-photo", odometerPhotoUpload.single("file"),
 
     const { error: uploadError } = await supabaseServer.storage
       .from(ODOMETER_PHOTOS_BUCKET)
-      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false, cacheControl: "31536000" });
 
     if (uploadError) {
       console.error("[driver/trips/upload-km-photo] Storage upload error:", uploadError);
@@ -3131,7 +3175,7 @@ router.post("/driver/trips/upload-km-photo", odometerPhotoUpload.single("file"),
 
 router.get("/expenses", async (_req, res): Promise<void> => {
   try {
-    const rows = await db.select().from(tripExpensesTable).orderBy(desc(tripExpensesTable.createdAt));
+    const rows = await db.select().from(tripExpensesTable).orderBy(desc(tripExpensesTable.createdAt)).limit(500);
     res.json(rows);
   } catch (err: any) {
     console.error("[expenses] Database query failed:", err?.message);
