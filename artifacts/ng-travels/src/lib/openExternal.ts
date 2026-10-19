@@ -10,6 +10,14 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
  * to a normal new tab.
  */
 export async function openExternalUrl(url: string) {
+  // On the web, open synchronously inside the click handler: awaiting the
+  // dynamic import first loses the user gesture and the popup gets blocked.
+  if (!Capacitor.isNativePlatform()) {
+    if (!window.open(url, "_blank", "noopener,noreferrer")) {
+      window.location.href = url;
+    }
+    return;
+  }
   try {
     const { Browser } = await import("@capacitor/browser");
     await Browser.open({ url });
@@ -42,7 +50,9 @@ export async function openInSystemBrowser(url: string) {
 }
 
 export function openWhatsApp(mobile: string, message?: string) {
-  const digits = (mobile || "").replace(/\D/g, "");
+  let digits = (mobile || "").replace(/\D/g, "").replace(/^0+/, "");
+  // wa.me needs the country code; bare 10-digit numbers are Indian.
+  if (digits.length === 10) digits = `91${digits}`;
   const text = message ? `?text=${encodeURIComponent(message)}` : "";
   return openExternalUrl(`https://wa.me/${digits}${text}`);
 }
