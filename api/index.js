@@ -61607,10 +61607,10 @@ var PgEnumColumn = class extends PgColumn {
 // ../../node_modules/.pnpm/drizzle-orm@0.45.2_@types+pg@8.20.0_pg@8.22.0/node_modules/drizzle-orm/subquery.js
 var Subquery = class {
   static [entityKind] = "Subquery";
-  constructor(sql3, fields, alias, isWith = false, usedTables = []) {
+  constructor(sql2, fields, alias, isWith = false, usedTables = []) {
     this._ = {
       brand: "Subquery",
-      sql: sql3,
+      sql: sql2,
       selectedFields: fields,
       alias,
       isWith,
@@ -62011,19 +62011,19 @@ function sql(strings, ...params) {
   }
   return new SQL(queryChunks);
 }
-((sql22) => {
+((sql2) => {
   function empty() {
     return new SQL([]);
   }
-  sql22.empty = empty;
+  sql2.empty = empty;
   function fromList(list) {
     return new SQL(list);
   }
-  sql22.fromList = fromList;
+  sql2.fromList = fromList;
   function raw(str) {
     return new SQL([new StringChunk(str)]);
   }
-  sql22.raw = raw;
+  sql2.raw = raw;
   function join(chunks, separator) {
     const result = [];
     for (const [i, chunk] of chunks.entries()) {
@@ -62034,24 +62034,24 @@ function sql(strings, ...params) {
     }
     return new SQL(result);
   }
-  sql22.join = join;
+  sql2.join = join;
   function identifier(value) {
     return new Name(value);
   }
-  sql22.identifier = identifier;
+  sql2.identifier = identifier;
   function placeholder2(name2) {
     return new Placeholder(name2);
   }
-  sql22.placeholder = placeholder2;
+  sql2.placeholder = placeholder2;
   function param2(value, encoder) {
     return new Param(value, encoder);
   }
-  sql22.param = param2;
+  sql2.param = param2;
 })(sql || (sql = {}));
 ((SQL2) => {
   class Aliased {
-    constructor(sql22, fieldAlias) {
-      this.sql = sql22;
+    constructor(sql2, fieldAlias) {
+      this.sql = sql2;
       this.fieldAlias = fieldAlias;
     }
     static [entityKind] = "SQL.Aliased";
@@ -64935,8 +64935,8 @@ var PgDialect = class {
       return "none";
     }
   }
-  sqlToQuery(sql22, invokeSource) {
-    return sql22.toQuery({
+  sqlToQuery(sql2, invokeSource) {
+    return sql2.toQuery({
       casing: this.casing,
       escapeName: this.escapeName,
       escapeParam: this.escapeParam,
@@ -67295,10 +67295,10 @@ var PgRelationalQuery = class extends QueryPromise {
 
 // ../../node_modules/.pnpm/drizzle-orm@0.45.2_@types+pg@8.20.0_pg@8.22.0/node_modules/drizzle-orm/pg-core/query-builders/raw.js
 var PgRaw = class extends QueryPromise {
-  constructor(execute, sql3, query, mapBatchResult) {
+  constructor(execute, sql2, query, mapBatchResult) {
     super();
     this.execute = execute;
-    this.sql = sql3;
+    this.sql = sql2;
     this.query = query;
     this.mapBatchResult = mapBatchResult;
   }
@@ -67618,8 +67618,8 @@ var NoopCache = class extends Cache {
   async onMutate(_params) {
   }
 };
-async function hashQuery(sql3, params) {
-  const dataToHash = `${sql3}-${JSON.stringify(params)}`;
+async function hashQuery(sql2, params) {
+  const dataToHash = `${sql2}-${JSON.stringify(params)}`;
   const encoder = new TextEncoder();
   const data = encoder.encode(dataToHash);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -67752,8 +67752,8 @@ var PgSession = class {
     ).all();
   }
   /** @internal */
-  async count(sql22, token) {
-    const res = await this.execute(sql22, token);
+  async count(sql2, token) {
+    const res = await this.execute(sql2, token);
     return Number(
       res[0]["count"]
     );
@@ -67975,8 +67975,8 @@ var NodePgSession = class _NodePgSession extends PgSession {
       if (isPool) session.client.release();
     }
   }
-  async count(sql22) {
-    const res = await this.execute(sql22);
+  async count(sql2) {
+    const res = await this.execute(sql2);
     return Number(
       res["rows"][0]["count"]
     );
@@ -98235,7 +98235,11 @@ router2.post("/trips", requireOwner, async (req, res) => {
     const driverCommissionType = req.body.driverCommissionType === "flat" ? "flat" : "percentage";
     const driverCommissionValue = Math.max(0, Number(req.body.driverCommissionValue || 0));
     const driverCommissionAmount = driverCommissionType === "flat" ? driverCommissionValue : Math.round(commercialFare.customerTotal * (driverCommissionValue / 100) * 100) / 100;
-    const bookingId = `TRP-${Date.now().toString().slice(-7)}`;
+    const now = /* @__PURE__ */ new Date();
+    const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fyPrefix = `${String(fyStart).slice(-2)}${String(fyStart + 1).slice(-2)}`;
+    const [{ maxSeq }] = await db.select({ maxSeq: sql`coalesce(max((substring(${tripsTable.bookingId} from ${fyPrefix.length + 1}))::int), 0)` }).from(tripsTable).where(sql`${tripsTable.bookingId} ~ ${`^${fyPrefix}[0-9]+$`}`);
+    const bookingId = `${fyPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
     let driverName = req.body.driverName || null;
     let driverMobile = req.body.driverMobile || null;
     if (req.body.driverId) {
@@ -99333,13 +99337,13 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 14,
-  versionName: "1.3.6",
+  versionCode: 15,
+  versionName: "1.3.7",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Route Planner: live place-suggestions for intermediate waypoints, per-leg (outbound/return) waypoint routing for asymmetric round trips, and corrected toll pricing that now checks both legs independently instead of only the outbound path."
+  releaseNotes: "Trip completion now captures billing at Ending KM: ops enter pricing, extras, discount and commission; drivers enter only toll, parking, waiting and return date. Billable KM comes from the odometer, and the fare summary appears after the trip ends."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,

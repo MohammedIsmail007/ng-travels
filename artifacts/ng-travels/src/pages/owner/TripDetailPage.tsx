@@ -252,11 +252,15 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
               <Gauge className="w-4 h-4 text-amber-700 dark:text-amber-400" /> Driver & Odometer KM Tracking
             </h2>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-background/60 p-3 rounded-lg border border-border text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-background/60 p-3 rounded-lg border border-border text-xs">
               <div className="col-span-2 sm:col-span-1">
                 <span className="text-muted-foreground text-[10px] block">Assigned Driver</span>
                 <span className="font-bold text-foreground">{trip.driverName || "Unassigned"}</span>
                 <span className="text-muted-foreground block text-[11px]">{trip.driverMobile || "No phone"}</span>
+              </div>
+              <div className="col-span-2 sm:col-span-1">
+                <span className="text-muted-foreground text-[10px] block">Assigned Vehicle</span>
+                <span className="font-bold text-foreground font-mono">{trip.vehicleNumber || "Unassigned"}</span>
               </div>
               {[
                 { label: "Left Stand", km: trip.standStartKm, photo: trip.standStartPhoto },

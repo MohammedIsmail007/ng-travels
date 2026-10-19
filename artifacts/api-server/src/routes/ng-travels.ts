@@ -1866,7 +1866,17 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       ? driverCommissionValue
       : Math.round(commercialFare.customerTotal * (driverCommissionValue / 100) * 100) / 100;
 
-    const bookingId = `TRP-${Date.now().toString().slice(-7)}`;
+    // Booking ID = financial year (Apr-Mar) as YYYY of start/end, then a running
+    // number: FY 2026-27 -> "NG-2627001", "NG-2627002", ...
+    const now = new Date();
+    const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fyPrefix = `${String(fyStart).slice(-2)}${String(fyStart + 1).slice(-2)}`;
+    const idPrefix = `NG-${fyPrefix}`;
+    const [{ maxSeq }] = await db
+      .select({ maxSeq: sql<number>`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` })
+      .from(tripsTable)
+      .where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
+    const bookingId = `${idPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
 
     let driverName: string | null = req.body.driverName || null;
     let driverMobile: string | null = req.body.driverMobile || null;
