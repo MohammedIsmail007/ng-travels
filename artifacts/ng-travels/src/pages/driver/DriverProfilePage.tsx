@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { User, Phone, Mail, Award, ShieldCheck, CheckCircle2, Clock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useInstalledVersion } from "@/hooks/useInstalledVersion";
 
 interface DriverProfilePageProps {
   driver?: any;
@@ -12,6 +13,7 @@ export const DriverProfilePage: React.FC<DriverProfilePageProps> = ({
   onUpdateAvailability,
 }) => {
   const [pendingAvailability, setPendingAvailability] = useState<string | null>(null);
+  const installedVersion = useInstalledVersion();
 
   const handleAvailabilityClick = async (availability: string) => {
     if (!onUpdateAvailability || pendingAvailability) return;
@@ -76,6 +78,14 @@ export const DriverProfilePage: React.FC<DriverProfilePageProps> = ({
             <span>Emergency Contact:</span>
             <span className="text-foreground">{driver.emergencyContact}</span>
           </div>
+          {installedVersion && (
+            <div className="flex justify-between">
+              <span>App Version:</span>
+              <span className="font-mono text-foreground">
+                v{installedVersion.versionName} ({installedVersion.build})
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

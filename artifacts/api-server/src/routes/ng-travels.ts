@@ -589,8 +589,8 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
     // the synthetic driver.<code>@auth.ngtravels.internal address, not the
     // driver's real contact email — the real email is stored on the driver
     // record for reference/notifications, not used as the auth identity.
-    const { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
-      email: driverAuthEmail(driverCode.toUpperCase()),
+    const authEmail = driverAuthEmail(driverCode.toUpperCase());
+    const authAttrs = {
       phone: toE164(mobile),
       password: initialPassword,
       email_confirm: true,
@@ -600,7 +600,42 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
         role: "driver",
         driver_id: driver.id,
       },
+    };
+    let { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
+      email: authEmail,
+      ...authAttrs,
     });
+
+    // A login for this driver code can be left behind when a driver record
+    // was removed outside the app. If it no longer belongs to any driver,
+    // take it over instead of failing; if it still belongs to one, the code
+    // is genuinely taken.
+    if (authError && /already.*registered|already exists/i.test(authError.message)) {
+      let existing: { id: string; user_metadata?: Record<string, any> } | undefined;
+      for (let page = 1; page <= 10 && !existing; page++) {
+        const { data: list, error: listError } = await supabaseServer.auth.admin.listUsers({ page, perPage: 1000 });
+        if (listError || !list?.users?.length) break;
+        existing = list.users.find((u) => u.email?.toLowerCase() === authEmail);
+        if (list.users.length < 1000) break;
+      }
+      const ownerId = Number(existing?.user_metadata?.driver_id);
+      const [ownerDriver] = ownerId
+        ? await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.id, ownerId))
+        : [];
+
+      if (existing && !ownerDriver) {
+        const { data: updated, error: updateError } = await supabaseServer.auth.admin.updateUserById(existing.id, authAttrs);
+        authData = updated;
+        authError = updateError;
+      } else {
+        await db.delete(driversTable).where(eq(driversTable.id, driver.id));
+        res.status(409).json({
+          success: false,
+          error: { code: "DRIVER_CODE_TAKEN", message: `Driver code ${driverCode.toUpperCase()} is already in use.` },
+        });
+        return;
+      }
+    }
 
     if (authError || !authData?.user) {
       await db.delete(driversTable).where(eq(driversTable.id, driver.id));
@@ -3402,13 +3437,13 @@ router.get("/settings", requireOwner, async (_req, res): Promise<void> => {
  * valid update-check response and can prompt the user to install this one.
  */
 const CURRENT_APP_VERSION = {
-  versionCode: 18,
-  versionName: "1.4.0",
+  versionCode: 19,
+  versionName: "1.4.1",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Driver email is now optional when creating a driver account, and driver creation errors now show the real reason.",
+  releaseNotes: "Driver email is now optional, a leftover login for a driver code no longer blocks creating a driver, and the installed app version is shown in Settings and the driver profile.",
 };
 const APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,

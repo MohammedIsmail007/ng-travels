@@ -7,13 +7,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { AdminUserManagementModal, CreateStaffUserData } from "@/components/admin/AdminUserManagementModal";
 import { apiFetch } from "@/lib/apiFetch";
 import { openInSystemBrowser } from "@/lib/openExternal";
+import { useInstalledVersion } from "@/hooks/useInstalledVersion";
 
 // Fallback shown only until /api/app/version answers (or if it fails) —
 // the server's CURRENT_APP_VERSION (artifacts/api-server/src/routes/ng-travels.ts)
 // is the actual source of truth; re-upload the APK there after each build,
 // this local fallback just needs to stay roughly current for offline/error cases.
 const FALLBACK_APP_VERSION = {
-  versionName: "1.4.0",
+  versionName: "1.4.1",
   url: "https://nihoyzdepvqkypvwpvvy.supabase.co/storage/v1/object/public/app-releases/NG-Travels.apk",
   releaseNotes: "",
 };
@@ -60,6 +61,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   // The Admin and Driver roles now ship as one unified APK, so both manifest
   // entries point at the same build — either one reflects the current release.
   const appVersion = appVersionManifest?.owner || appVersionManifest?.driver || FALLBACK_APP_VERSION;
+
+  const installedVersion = useInstalledVersion();
 
   const handleToggleStaffStatus = async (staffUser: any) => {
     if (!onUpdateStaffUser || pendingStaffAction) return;
@@ -214,6 +217,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <ShieldCheck className="w-3 h-3" /> <Car className="w-3 h-3" /> ADMIN + DRIVER APK
             </div>
             <h4 className="text-sm font-bold text-foreground">NG-Travels App</h4>
+            {installedVersion && (
+              <p className="text-[11px] font-mono text-muted-foreground">
+                Installed: v{installedVersion.versionName} (build {installedVersion.build})
+                {installedVersion.versionName === appVersion.versionName
+                  ? " · up to date"
+                  : ` · latest v${appVersion.versionName}`}
+              </p>
+            )}
             <p className="text-xs text-muted-foreground max-w-md">
               {appVersion.releaseNotes ||
                 "One app for everyone — pick Operations Admin or Driver Pilot on the sign-in screen. Full Command Desk, dispatch, live GPS radar, and revenue reports for admins; cockpit HUD, journey roster, odometer capture, and expense claims for drivers."}
