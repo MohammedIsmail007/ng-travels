@@ -5,7 +5,6 @@ import { apiFetch } from "@/lib/apiFetch";
 import {
   Car,
   Phone,
-  Mail,
   Award,
   CheckCircle2,
   AlertCircle,
@@ -230,18 +229,22 @@ export const DriversPage: React.FC<DriversPageProps> = ({
                     {drv.mobile}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Driving License:</span>
-                  <span className="font-mono text-foreground">
-                    {drv.licenseNumber || "DL-KA01-PENDING"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Rating:</span>
-                  <span className="text-amber-700 dark:text-amber-400 font-bold">
-                    ★ {drv.rating || "4.8"} / 5.0
-                  </span>
-                </div>
+                {drv.licenseNumber && (
+                  <div className="flex justify-between">
+                    <span>Driving License:</span>
+                    <span className="font-mono text-foreground">
+                      {drv.licenseNumber}
+                    </span>
+                  </div>
+                )}
+                {drv.rating && (
+                  <div className="flex justify-between">
+                    <span>Rating:</span>
+                    <span className="text-amber-700 dark:text-amber-400 font-bold">
+                      ★ {drv.rating} / 5.0
+                    </span>
+                  </div>
+                )}
               </div>
 
               {drv.notes && (

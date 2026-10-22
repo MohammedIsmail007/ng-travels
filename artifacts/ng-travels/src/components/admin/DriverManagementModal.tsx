@@ -3,7 +3,6 @@ import {
   X,
   Plus,
   Key,
-  Mail,
   User,
   Phone,
   AlertCircle,
@@ -25,8 +24,7 @@ export interface CreateDriverData {
   name: string;
   driverCode: string;
   mobile: string;
-  email?: string;
-  licenseNumber?: string;
+  licenseNumber: string;
   licenseExpiry?: string;
   emergencyContact?: string;
   initialPassword: string;
@@ -51,7 +49,6 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
     name: "",
     driverCode: "",
     mobile: "",
-    email: "",
     licenseNumber: "",
     licenseExpiry: "",
     emergencyContact: "",
@@ -74,11 +71,12 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
       !createForm.name ||
       !createForm.driverCode ||
       !createForm.mobile ||
+      !createForm.licenseNumber.trim() ||
       !createForm.initialPassword
     ) {
       setMessage({
         type: "error",
-        text: "Name, driver code, mobile, and password are required.",
+        text: "Name, driver code, mobile, license number, and password are required.",
       });
       return;
     }
@@ -102,8 +100,7 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
         name: createForm.name,
         driverCode: createForm.driverCode.toUpperCase(),
         mobile: createForm.mobile,
-        email: createForm.email.trim() || undefined,
-        licenseNumber: createForm.licenseNumber || undefined,
+        licenseNumber: createForm.licenseNumber.trim(),
         licenseExpiry: createForm.licenseExpiry || undefined,
         emergencyContact: createForm.emergencyContact || undefined,
         initialPassword: createForm.initialPassword,
@@ -116,7 +113,6 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
         name: "",
         driverCode: "",
         mobile: "",
-        email: "",
         licenseNumber: "",
         licenseExpiry: "",
         emergencyContact: "",
@@ -306,29 +302,12 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-2">
-                    Email Address (optional)
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-muted-foreground absolute left-3 top-3" />
-                    <Input
-                      type="email"
-                      placeholder="e.g. driver@example.com"
-                      value={createForm.email}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, email: e.target.value })
-                      }
-                      className="pl-9"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-foreground mb-2">
                     License Number
                   </label>
                   <Input
                     type="text"
-                    placeholder="Optional"
+                    required
+                    placeholder="e.g. KA0120200012345"
                     value={createForm.licenseNumber}
                     onChange={(e) =>
                       setCreateForm({

@@ -553,17 +553,15 @@ router.post("/auth/driver-password-reset-request", async (req, res): Promise<voi
  * Admin-only endpoint
  */
 router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
-  const { name, driverCode, mobile, email, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
+  const { name, driverCode, mobile, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
 
-  if (!name || !driverCode || !mobile || !initialPassword) {
+  if (!name || !driverCode || !mobile || !String(licenseNumber ?? "").trim() || !initialPassword) {
     res.status(400).json({
       success: false,
-      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, and initial password are required." },
+      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, license number, and initial password are required." },
     });
     return;
   }
-
-  const contactEmail: string | null = email ? String(email).toLowerCase().trim() || null : null;
 
   try {
     // Create driver record first so its id exists to stamp into the auth
@@ -577,8 +575,7 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
         name,
         driverCode: driverCode.toUpperCase(),
         mobile,
-        email: contactEmail,
-        licenseNumber: licenseNumber || null,
+        licenseNumber: String(licenseNumber).trim(),
         licenseExpiry: licenseExpiry || null,
         emergencyContact: emergencyContact || null,
         status: "active",
@@ -652,7 +649,6 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
       .update(usersTable)
       .set({
         name,
-        ...(contactEmail ? { email: contactEmail } : {}),
         phone: mobile,
         role: "driver",
         driverId: driver.id,
@@ -668,7 +664,6 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
         name: driver.name,
         driverCode: driver.driverCode,
         mobile: driver.mobile,
-        email: driver.email,
       },
     });
   } catch (err: any) {
