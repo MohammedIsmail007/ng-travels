@@ -555,13 +555,15 @@ router.post("/auth/driver-password-reset-request", async (req, res): Promise<voi
 router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
   const { name, driverCode, mobile, email, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
 
-  if (!name || !driverCode || !mobile || !email || !initialPassword) {
+  if (!name || !driverCode || !mobile || !initialPassword) {
     res.status(400).json({
       success: false,
-      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, email, and initial password are required." },
+      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, and initial password are required." },
     });
     return;
   }
+
+  const contactEmail: string | null = email ? String(email).toLowerCase().trim() || null : null;
 
   try {
     // Create driver record first so its id exists to stamp into the auth
@@ -575,7 +577,7 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
         name,
         driverCode: driverCode.toUpperCase(),
         mobile,
-        email: email.toLowerCase().trim(),
+        email: contactEmail,
         licenseNumber: licenseNumber || null,
         licenseExpiry: licenseExpiry || null,
         emergencyContact: emergencyContact || null,
@@ -615,7 +617,7 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
       .update(usersTable)
       .set({
         name,
-        email: email.toLowerCase().trim(),
+        ...(contactEmail ? { email: contactEmail } : {}),
         phone: mobile,
         role: "driver",
         driverId: driver.id,

@@ -91,7 +91,7 @@ export const DriversPage: React.FC<DriversPageProps> = ({
       if (!response.ok) {
         const error = await response.json();
         throw new Error(
-          error.message || `Failed to create driver (${response.status})`,
+          error?.error?.message || error?.message || `Failed to create driver (${response.status})`,
         );
       }
 

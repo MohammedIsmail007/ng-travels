@@ -25,7 +25,7 @@ export interface CreateDriverData {
   name: string;
   driverCode: string;
   mobile: string;
-  email: string;
+  email?: string;
   licenseNumber?: string;
   licenseExpiry?: string;
   emergencyContact?: string;
@@ -74,12 +74,11 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
       !createForm.name ||
       !createForm.driverCode ||
       !createForm.mobile ||
-      !createForm.email ||
       !createForm.initialPassword
     ) {
       setMessage({
         type: "error",
-        text: "Name, driver code, mobile, email, and password are required.",
+        text: "Name, driver code, mobile, and password are required.",
       });
       return;
     }
@@ -103,7 +102,7 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
         name: createForm.name,
         driverCode: createForm.driverCode.toUpperCase(),
         mobile: createForm.mobile,
-        email: createForm.email,
+        email: createForm.email.trim() || undefined,
         licenseNumber: createForm.licenseNumber || undefined,
         licenseExpiry: createForm.licenseExpiry || undefined,
         emergencyContact: createForm.emergencyContact || undefined,
@@ -307,13 +306,12 @@ export const DriverManagementModal: React.FC<DriverManagementModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-2">
-                    Email Address *
+                    Email Address (optional)
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-muted-foreground absolute left-3 top-3" />
                     <Input
                       type="email"
-                      required
                       placeholder="e.g. driver@example.com"
                       value={createForm.email}
                       onChange={(e) =>

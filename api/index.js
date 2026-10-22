@@ -20705,27 +20705,27 @@ var require_router = __commonJS({
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var methods = METHODS.map((method) => method.toLowerCase());
-    module.exports = Router4;
+    module.exports = Router5;
     module.exports.Route = Route;
-    function Router4(options) {
-      if (!(this instanceof Router4)) {
-        return new Router4(options);
+    function Router5(options) {
+      if (!(this instanceof Router5)) {
+        return new Router5(options);
       }
       const opts = options || {};
-      function router4(req, res, next) {
-        router4.handle(req, res, next);
+      function router5(req, res, next) {
+        router5.handle(req, res, next);
       }
-      Object.setPrototypeOf(router4, this);
-      router4.caseSensitive = opts.caseSensitive;
-      router4.mergeParams = opts.mergeParams;
-      router4.params = {};
-      router4.strict = opts.strict;
-      router4.stack = [];
-      return router4;
+      Object.setPrototypeOf(router5, this);
+      router5.caseSensitive = opts.caseSensitive;
+      router5.mergeParams = opts.mergeParams;
+      router5.params = {};
+      router5.strict = opts.strict;
+      router5.stack = [];
+      return router5;
     }
-    Router4.prototype = function() {
+    Router5.prototype = function() {
     };
-    Router4.prototype.param = function param(name, fn) {
+    Router5.prototype.param = function param(name, fn) {
       if (!name) {
         throw new TypeError("argument name is required");
       }
@@ -20745,7 +20745,7 @@ var require_router = __commonJS({
       params.push(fn);
       return this;
     };
-    Router4.prototype.handle = function handle(req, res, callback) {
+    Router5.prototype.handle = function handle(req, res, callback) {
       if (!callback) {
         throw new TypeError("argument callback is required");
       }
@@ -20872,7 +20872,7 @@ var require_router = __commonJS({
         }
       }
     };
-    Router4.prototype.use = function use(handler) {
+    Router5.prototype.use = function use(handler) {
       let offset = 0;
       let path = "/";
       if (typeof handler !== "function") {
@@ -20905,7 +20905,7 @@ var require_router = __commonJS({
       }
       return this;
     };
-    Router4.prototype.route = function route(path) {
+    Router5.prototype.route = function route(path) {
       const route2 = new Route(path);
       const layer = new Layer(path, {
         sensitive: this.caseSensitive,
@@ -20920,7 +20920,7 @@ var require_router = __commonJS({
       return route2;
     };
     methods.concat("all").forEach(function(method) {
-      Router4.prototype[method] = function(path) {
+      Router5.prototype[method] = function(path) {
         const route = this.route(path);
         route[method].apply(route, slice.call(arguments, 1));
         return this;
@@ -21103,13 +21103,13 @@ var require_application = __commonJS({
     var compileTrust = require_utils3().compileTrust;
     var resolve = __require("node:path").resolve;
     var once = require_once();
-    var Router4 = require_router();
+    var Router5 = require_router();
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var app2 = exports = module.exports = {};
     var trustProxyDefaultSymbol = "@@symbol:trust_proxy_default";
     app2.init = function init() {
-      var router4 = null;
+      var router5 = null;
       this.cache = /* @__PURE__ */ Object.create(null);
       this.engines = /* @__PURE__ */ Object.create(null);
       this.settings = /* @__PURE__ */ Object.create(null);
@@ -21118,13 +21118,13 @@ var require_application = __commonJS({
         configurable: true,
         enumerable: true,
         get: function getrouter() {
-          if (router4 === null) {
-            router4 = new Router4({
+          if (router5 === null) {
+            router5 = new Router5({
               caseSensitive: this.enabled("case sensitive routing"),
               strict: this.enabled("strict routing")
             });
           }
-          return router4;
+          return router5;
         }
       });
     };
@@ -21195,15 +21195,15 @@ var require_application = __commonJS({
       if (fns.length === 0) {
         throw new TypeError("app.use() requires a middleware function");
       }
-      var router4 = this.router;
+      var router5 = this.router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router4.use(path, fn2);
+          return router5.use(path, fn2);
         }
         debug(".use app under %s", path);
         fn2.mountpath = path;
         fn2.parent = this;
-        router4.use(path, function mounted_app(req, res, next) {
+        router5.use(path, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             Object.setPrototypeOf(req, orig.request);
@@ -23788,7 +23788,7 @@ var require_express = __commonJS({
     var EventEmitter = __require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
-    var Router4 = require_router();
+    var Router5 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -23810,8 +23810,8 @@ var require_express = __commonJS({
     exports.application = proto;
     exports.request = req;
     exports.response = res;
-    exports.Route = Router4.Route;
-    exports.Router = Router4;
+    exports.Route = Router5.Route;
+    exports.Router = Router5;
     exports.json = bodyParser.json;
     exports.raw = bodyParser.raw;
     exports.static = require_serve_static();
@@ -60972,12 +60972,12 @@ var require_main3 = __commonJS({
 });
 
 // src/app.ts
-var import_express4 = __toESM(require_express2(), 1);
+var import_express5 = __toESM(require_express2(), 1);
 var import_cors = __toESM(require_lib3(), 1);
 var import_pino_http = __toESM(require_logger(), 1);
 
 // src/routes/index.ts
-var import_express3 = __toESM(require_express2(), 1);
+var import_express4 = __toESM(require_express2(), 1);
 
 // src/routes/health.ts
 var import_express = __toESM(require_express2(), 1);
@@ -97235,19 +97235,20 @@ router2.post("/auth/driver-password-reset-request", async (req, res) => {
 });
 router2.post("/admin/drivers", requireOwner, async (req, res) => {
   const { name, driverCode, mobile, email: email3, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
-  if (!name || !driverCode || !mobile || !email3 || !initialPassword) {
+  if (!name || !driverCode || !mobile || !initialPassword) {
     res.status(400).json({
       success: false,
-      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, email, and initial password are required." }
+      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, and initial password are required." }
     });
     return;
   }
+  const contactEmail = email3 ? String(email3).toLowerCase().trim() || null : null;
   try {
     const [driver] = await db.insert(driversTable).values({
       name,
       driverCode: driverCode.toUpperCase(),
       mobile,
-      email: email3.toLowerCase().trim(),
+      email: contactEmail,
       licenseNumber: licenseNumber || null,
       licenseExpiry: licenseExpiry || null,
       emergencyContact: emergencyContact || null,
@@ -97275,7 +97276,7 @@ router2.post("/admin/drivers", requireOwner, async (req, res) => {
     }
     await db.update(usersTable).set({
       name,
-      email: email3.toLowerCase().trim(),
+      ...contactEmail ? { email: contactEmail } : {},
       phone: mobile,
       role: "driver",
       driverId: driver.id,
@@ -97539,10 +97540,18 @@ router2.get("/dashboard", requireOwner, async (_req, res) => {
   const weekStart = startOfWeek(currentDay);
   const monthStart = startOfMonth(currentDay);
   try {
-    const allTrips = await db.select().from(tripsTable);
-    const approvedExpenses = await db.select().from(tripExpensesTable).where(eq(tripExpensesTable.status, "approved"));
-    const allDrivers = await db.select().from(driversTable);
-    const allVehicles = await db.select().from(vehiclesTable);
+    const allTrips = await db.select({
+      id: tripsTable.id,
+      startDate: tripsTable.startDate,
+      status: tripsTable.status,
+      vehicleId: tripsTable.vehicleId,
+      customerTotal: tripsTable.customerTotal,
+      totalPaid: tripsTable.totalPaid,
+      remainingBalance: tripsTable.remainingBalance
+    }).from(tripsTable);
+    const approvedExpenses = await db.select({ tripId: tripExpensesTable.tripId, amount: tripExpensesTable.amount }).from(tripExpensesTable).where(eq(tripExpensesTable.status, "approved"));
+    const allDrivers = await db.select({ availability: driversTable.availability, status: driversTable.status }).from(driversTable);
+    const allVehicles = await db.select({ status: vehiclesTable.status }).from(vehiclesTable);
     const todayTrips = allTrips.filter((trip) => trip.startDate === currentDay);
     const inRange = (trip, from) => trip.startDate >= from && trip.startDate <= currentDay;
     const revenue = (trips) => trips.reduce((sum, trip) => sum + numeric2(trip.customerTotal), 0);
@@ -98133,6 +98142,8 @@ router2.get("/trips", async (req, res) => {
     const statusFilter = req.query.status ? String(req.query.status) : void 0;
     const driverIdFilter = req.query.driverId ? Number(req.query.driverId) : void 0;
     const customerIdFilter = req.query.customerId ? Number(req.query.customerId) : void 0;
+    const tripsLimit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    const tripsOffset = Math.max(Number(req.query.offset) || 0, 0);
     const effectiveDriverId = viewer?.role === "driver" && viewer.driverId ? viewer.driverId : driverIdFilter;
     const trips = await db.select().from(tripsTable).where(
       and(
@@ -98140,8 +98151,9 @@ router2.get("/trips", async (req, res) => {
         customerIdFilter ? eq(tripsTable.customerId, customerIdFilter) : void 0,
         statusFilter ? eq(tripsTable.status, statusFilter) : void 0
       )
-    ).orderBy(desc(tripsTable.createdAt), desc(tripsTable.id));
-    const customers = await db.select().from(customersTable);
+    ).orderBy(desc(tripsTable.createdAt), desc(tripsTable.id)).limit(search ? 5e3 : tripsLimit).offset(search ? 0 : tripsOffset);
+    const customerIds = [...new Set(trips.map((t) => t.customerId))];
+    const customers = customerIds.length ? await db.select().from(customersTable).where(inArray(customersTable.id, customerIds)) : [];
     const customerMap = new Map(customers.map((c) => [c.id, c]));
     const tripViews = trips.map(
       (t) => tripView(t, customerMap.get(t.customerId) || { id: t.customerId, name: "Customer", mobile: "" })
@@ -98238,8 +98250,9 @@ router2.post("/trips", requireOwner, async (req, res) => {
     const now = /* @__PURE__ */ new Date();
     const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyPrefix = `${String(fyStart).slice(-2)}${String(fyStart + 1).slice(-2)}`;
-    const [{ maxSeq }] = await db.select({ maxSeq: sql`coalesce(max((substring(${tripsTable.bookingId} from ${fyPrefix.length + 1}))::int), 0)` }).from(tripsTable).where(sql`${tripsTable.bookingId} ~ ${`^${fyPrefix}[0-9]+$`}`);
-    const bookingId = `${fyPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
+    const idPrefix = `NG-${fyPrefix}`;
+    const [{ maxSeq }] = await db.select({ maxSeq: sql`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` }).from(tripsTable).where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
+    const bookingId = `${idPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
     let driverName = req.body.driverName || null;
     let driverMobile = req.body.driverMobile || null;
     if (req.body.driverId) {
@@ -98967,6 +98980,15 @@ router2.post("/trips/:id/billing", async (req, res) => {
     res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to update billing" } });
   }
 });
+var LOCATION_RETENTION_DAYS = 7;
+var lastLocationPrune = 0;
+function pruneOldLocations() {
+  const now = Date.now();
+  if (now - lastLocationPrune < 6 * 60 * 60 * 1e3) return;
+  lastLocationPrune = now;
+  const cutoff = new Date(now - LOCATION_RETENTION_DAYS * 24 * 60 * 60 * 1e3);
+  db.delete(driverLocationsTable).where(lte(driverLocationsTable.timestamp, cutoff)).catch((err) => console.warn("[location] prune failed:", err?.message));
+}
 router2.post("/driver/trips/:id/location", async (req, res) => {
   const id = Number(req.params.id);
   const { latitude, longitude, speed, heading, accuracy, batteryLevel } = req.body;
@@ -98975,12 +98997,13 @@ router2.post("/driver/trips/:id/location", async (req, res) => {
     return;
   }
   try {
-    const [trip] = await db.select().from(tripsTable).where(eq(tripsTable.id, id));
+    const [trip] = await db.select({ driverId: tripsTable.driverId }).from(tripsTable).where(eq(tripsTable.id, id));
     if (!trip) {
       res.status(404).json({ success: false, error: { code: "NOT_FOUND", message: "Trip not found" } });
       return;
     }
     const driverId = trip.driverId || 1;
+    pruneOldLocations();
     await db.insert(driverLocationsTable).values({
       driverId,
       tripId: id,
@@ -99028,7 +99051,7 @@ router2.get("/trips/:id/live-location", async (req, res) => {
 });
 router2.get("/payments", async (_req, res) => {
   try {
-    const rows = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.createdAt));
+    const rows = await db.select().from(paymentsTable).orderBy(desc(paymentsTable.createdAt)).limit(500);
     res.json(rows);
   } catch (err) {
     console.error("[payments] Database query failed:", err?.message);
@@ -99115,7 +99138,7 @@ router2.post("/expenses/upload-receipt", receiptUpload.single("file"), async (re
     const viewer = await viewerFor(req);
     const ext = (req.file.originalname.split(".").pop() || "jpg").toLowerCase().slice(0, 5);
     const path = `${viewer?.driverId || "unknown"}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error: uploadError } = await supabaseServer.storage.from(EXPENSE_RECEIPTS_BUCKET).upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+    const { error: uploadError } = await supabaseServer.storage.from(EXPENSE_RECEIPTS_BUCKET).upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false, cacheControl: "31536000" });
     if (uploadError) {
       console.error("[expenses/upload-receipt] Storage upload error:", uploadError);
       res.status(500).json({
@@ -99153,7 +99176,7 @@ router2.post("/driver/trips/upload-km-photo", odometerPhotoUpload.single("file")
     const viewer = await viewerFor(req);
     const ext = (req.file.originalname.split(".").pop() || "jpg").toLowerCase().slice(0, 5);
     const path = `${viewer?.driverId || viewer?.id || "unknown"}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    const { error: uploadError } = await supabaseServer.storage.from(ODOMETER_PHOTOS_BUCKET).upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+    const { error: uploadError } = await supabaseServer.storage.from(ODOMETER_PHOTOS_BUCKET).upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: false, cacheControl: "31536000" });
     if (uploadError) {
       console.error("[driver/trips/upload-km-photo] Storage upload error:", uploadError);
       res.status(500).json({
@@ -99171,7 +99194,7 @@ router2.post("/driver/trips/upload-km-photo", odometerPhotoUpload.single("file")
 });
 router2.get("/expenses", async (_req, res) => {
   try {
-    const rows = await db.select().from(tripExpensesTable).orderBy(desc(tripExpensesTable.createdAt));
+    const rows = await db.select().from(tripExpensesTable).orderBy(desc(tripExpensesTable.createdAt)).limit(500);
     res.json(rows);
   } catch (err) {
     console.error("[expenses] Database query failed:", err?.message);
@@ -99337,13 +99360,13 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 15,
-  versionName: "1.3.7",
+  versionCode: 17,
+  versionName: "1.3.9",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Trip completion now captures billing at Ending KM: ops enter pricing, extras, discount and commission; drivers enter only toll, parking, waiting and return date. Billable KM comes from the odometer, and the fare summary appears after the trip ends."
+  releaseNotes: "Faster, lighter data usage: trip and dashboard lists now load only what they need, receipts and odometer photos are cached on the device, and old GPS history is cleaned up automatically."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,
@@ -99370,11 +99393,74 @@ router2.patch("/settings", requireOwner, async (req, res) => {
 });
 var ng_travels_default = router2;
 
-// src/routes/index.ts
+// src/routes/cron.ts
+var import_express3 = __toESM(require_express2(), 1);
 var router3 = (0, import_express3.Router)();
-router3.use(health_default);
-router3.use(ng_travels_default);
-var routes_default = router3;
+var TRIP_IMAGE_BUCKETS = ["odometer-photos", "expense-receipts"];
+var RETENTION_MS = 24 * 60 * 60 * 1e3;
+var PAGE_SIZE = 1e3;
+async function expiredPaths(bucket, cutoff) {
+  const storage = supabaseServer.storage.from(bucket);
+  const expired = [];
+  const { data: folders, error: error61 } = await storage.list("", { limit: PAGE_SIZE });
+  if (error61) throw error61;
+  for (const entry of folders ?? []) {
+    if (entry.id) {
+      if (new Date(entry.created_at ?? 0).getTime() < cutoff) expired.push(entry.name);
+      continue;
+    }
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      const { data: files, error: listError } = await storage.list(entry.name, { limit: PAGE_SIZE, offset });
+      if (listError) throw listError;
+      for (const file2 of files ?? []) {
+        if (file2.id && new Date(file2.created_at ?? 0).getTime() < cutoff) expired.push(`${entry.name}/${file2.name}`);
+      }
+      if (!files || files.length < PAGE_SIZE) break;
+    }
+  }
+  return expired;
+}
+router3.get("/cron/cleanup-trip-images", async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+    res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Invalid cron credentials" } });
+    return;
+  }
+  const cutoff = Date.now() - RETENTION_MS;
+  const summary = {};
+  try {
+    for (const bucket of TRIP_IMAGE_BUCKETS) {
+      const paths = await expiredPaths(bucket, cutoff);
+      summary[bucket] = 0;
+      for (let i = 0; i < paths.length; i += 100) {
+        const batch = paths.slice(i, i + 100);
+        const { error: error61 } = await supabaseServer.storage.from(bucket).remove(batch);
+        if (error61) throw error61;
+        summary[bucket] += batch.length;
+        for (const path of batch) {
+          const match = `%/${bucket}/${path}`;
+          await db.update(tripsTable).set({ startKmPhoto: null }).where(like(tripsTable.startKmPhoto, match));
+          await db.update(tripsTable).set({ endKmPhoto: null }).where(like(tripsTable.endKmPhoto, match));
+          await db.update(tripsTable).set({ standStartPhoto: null }).where(like(tripsTable.standStartPhoto, match));
+          await db.update(tripsTable).set({ standReturnPhoto: null }).where(like(tripsTable.standReturnPhoto, match));
+          await db.update(tripExpensesTable).set({ receiptPath: null }).where(like(tripExpensesTable.receiptPath, `%${path}`));
+        }
+      }
+    }
+    res.json({ success: true, deleted: summary });
+  } catch (err) {
+    console.error("[cron/cleanup-trip-images] Failed:", err?.message);
+    res.status(500).json({ success: false, deleted: summary, error: { code: "CLEANUP_FAILED", message: err?.message } });
+  }
+});
+var cron_default = router3;
+
+// src/routes/index.ts
+var router4 = (0, import_express4.Router)();
+router4.use(health_default);
+router4.use(cron_default);
+router4.use(ng_travels_default);
+var routes_default = router4;
 
 // src/lib/logger.ts
 var import_pino = __toESM(require_pino(), 1);
@@ -99395,7 +99481,7 @@ var logger = (0, import_pino.default)({
 });
 
 // src/app.ts
-var app = (0, import_express4.default)();
+var app = (0, import_express5.default)();
 app.set("etag", false);
 app.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
@@ -99422,8 +99508,8 @@ app.use(
   })
 );
 app.use((0, import_cors.default)({ credentials: true, origin: true }));
-app.use(import_express4.default.json({ limit: "2mb" }));
-app.use(import_express4.default.urlencoded({ extended: true, limit: "2mb" }));
+app.use(import_express5.default.json({ limit: "2mb" }));
+app.use(import_express5.default.urlencoded({ extended: true, limit: "2mb" }));
 app.use("/api", routes_default);
 app.use(routes_default);
 var app_default = app;
