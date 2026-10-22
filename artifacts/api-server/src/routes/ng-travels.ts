@@ -667,7 +667,14 @@ router.post("/admin/drivers", requireOwner, async (req, res): Promise<void> => {
       },
     });
   } catch (err: any) {
-    console.error("[admin] Create driver error:", err);
+    console.error("[admin] Create driver error:", err, err?.cause);
+    if ((err?.code ?? err?.cause?.code) === "23505") {
+      res.status(409).json({
+        success: false,
+        error: { code: "DRIVER_CODE_TAKEN", message: `Driver code ${String(driverCode).toUpperCase()} is already in use.` },
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       error: { code: "SERVER_ERROR", message: "Unable to create driver account." },
