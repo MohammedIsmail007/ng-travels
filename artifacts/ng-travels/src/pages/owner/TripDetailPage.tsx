@@ -647,11 +647,19 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
                   <span className="font-mono text-rose-700 dark:text-rose-400">{formatINR(trip.driverCommissionAmount)}</span>
                 </div>
               )}
+              {Number(trip.agentCommissionAmount || 0) > 0 && (
+                <div className="flex justify-between text-muted-foreground text-[11px]">
+                  <span>
+                    Agent Commission{trip.agentName ? ` — ${trip.agentName}` : ""} {trip.agentCommissionType === "percentage" ? `(${trip.agentCommissionValue}%)` : "(Flat)"}:
+                  </span>
+                  <span className="font-mono text-rose-700 dark:text-rose-400">{formatINR(trip.agentCommissionAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-emerald-700 dark:text-emerald-400">
                 <span>Trip Operating Profit:</span>
                 <span className="font-mono">
                   {formatINR(
-                    Number(trip.customerTotal) - Number(trip.expenseTotal || 0) - Number(trip.driverCommissionAmount || 0)
+                    Number(trip.customerTotal) - Number(trip.expenseTotal || 0) - Number(trip.driverCommissionAmount || 0) - Number(trip.agentCommissionAmount || 0)
                   )}
                 </span>
               </div>

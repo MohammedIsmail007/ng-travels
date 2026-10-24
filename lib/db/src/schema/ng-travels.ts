@@ -316,6 +316,16 @@ export const tripsTable = pgTable(
     driverCommissionAmount: numeric("driver_commission_amount", { precision: 12, scale: 2 })
       .notNull()
       .default("0"),
+    // Agent who brought the booking — same percentage/flat model as the driver
+    // commission. Internal reference only, never shown to the customer.
+    agentName: text("agent_name"),
+    agentCommissionType: text("agent_commission_type").notNull().default("percentage"),
+    agentCommissionValue: numeric("agent_commission_value", { precision: 12, scale: 2 })
+      .notNull()
+      .default("0"),
+    agentCommissionAmount: numeric("agent_commission_amount", { precision: 12, scale: 2 })
+      .notNull()
+      .default("0"),
     toll: numeric("toll", { precision: 12, scale: 2 })
       .notNull()
       .default("0"),

@@ -188,6 +188,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   const [ratePerKm, setRatePerKm] = useState(defaultRate);
   const [driverCommissionType, setDriverCommissionType] = useState<"percentage" | "flat">("percentage");
   const [driverCommissionValue, setDriverCommissionValue] = useState(0);
+  const [agentName, setAgentName] = useState("");
+  const [agentCommissionType, setAgentCommissionType] = useState<"percentage" | "flat">("percentage");
+  const [agentCommissionValue, setAgentCommissionValue] = useState(0);
   const [finalToll, setFinalToll] = useState(0);
   const [parking, setParking] = useState(0);
   const [permitCharge, setPermitCharge] = useState(0);
@@ -443,6 +446,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
       setRatePerKm(Number(editingTrip.ratePerKm || defaultRate));
       setDriverCommissionType(editingTrip.driverCommissionType === "flat" ? "flat" : "percentage");
       setDriverCommissionValue(Number(editingTrip.driverCommissionValue || 0));
+      setAgentName(editingTrip.agentName || "");
+      setAgentCommissionType(editingTrip.agentCommissionType === "flat" ? "flat" : "percentage");
+      setAgentCommissionValue(Number(editingTrip.agentCommissionValue || 0));
       setFinalToll(Number(editingTrip.finalToll || editingTrip.toll || 0));
       setParking(Number(editingTrip.parking || 0));
       setPermitCharge(Number(editingTrip.permitCharge || 0));
@@ -505,6 +511,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
       setRatePerKm(defaultRate);
       setDriverCommissionType("percentage");
       setDriverCommissionValue(0);
+      setAgentName("");
+      setAgentCommissionType("percentage");
+      setAgentCommissionValue(0);
       setFinalToll(0);
       setParking(0);
       setPermitCharge(0);
@@ -618,6 +627,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
   const driverCommissionAmount = driverCommissionType === "flat"
     ? driverCommissionValue
     : Math.round(customerTotal * (driverCommissionValue / 100) * 100) / 100;
+  const agentCommissionAmount = agentCommissionType === "flat"
+    ? agentCommissionValue
+    : Math.round(customerTotal * (agentCommissionValue / 100) * 100) / 100;
 
   const handleNext = () => {
     if (step === 1) {
@@ -804,6 +816,10 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           driverCommissionType,
           driverCommissionValue: String(driverCommissionValue),
           driverCommissionAmount: String(driverCommissionAmount),
+          agentName: agentName.trim() || null,
+          agentCommissionType,
+          agentCommissionValue: String(agentCommissionValue),
+          agentCommissionAmount: String(agentCommissionAmount),
           baseFare: String(commercialFare.distanceFare),
           finalToll: String(commercialFare.toll),
           toll: String(commercialFare.toll),
@@ -862,6 +878,9 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
           packageTotal,
           driverCommissionType,
           driverCommissionValue,
+          agentName: agentName.trim(),
+          agentCommissionType,
+          agentCommissionValue,
           minimumKmPerDay: 0,
           driverBataPerDay: 0,
           billingDayPolicy,
@@ -1623,6 +1642,43 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+
+                {/* Agent commission — internal reference only, never shown to the customer */}
+                <div className="bg-card/40 p-4 rounded-xl border border-border space-y-3">
+                  <div>
+                    <span className="text-[11px] font-bold text-foreground block">Agent Commission (optional)</span>
+                    <span className="text-[10px] text-muted-foreground">Internal reference only — deducted from profit, not billed to the customer.</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">Agent Name</label>
+                      <Input
+                        value={agentName}
+                        onChange={(e) => setAgentName(e.target.value)}
+                        className="bg-card border-border text-xs h-9"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground block mb-1">
+                        {agentCommissionType === "flat" ? "Commission Amount (₹)" : "Commission (% of Customer Total)"}
+                      </label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={agentCommissionValue || ""}
+                        onChange={(e) => setAgentCommissionValue(Math.max(0, Number(e.target.value)))}
+                        className="bg-card border-border text-xs h-9 font-mono"
+                      />
+                    </div>
+                    <div className="flex items-end gap-2 pb-1.5">
+                      <Switch checked={agentCommissionType === "flat"} onCheckedChange={(c) => setAgentCommissionType(c ? "flat" : "percentage")} />
+                      <span className="text-[11px] text-muted-foreground">
+                        {agentCommissionType === "flat" ? "Flat ₹" : "Percentage"}
+                        {agentCommissionValue > 0 && ` = ${formatINR(agentCommissionAmount)}`}
+                      </span>
+                    </div>
                   </div>
                 </div>
 

@@ -255,6 +255,10 @@ function tripView(
     driverCommissionType: trip.driverCommissionType || "percentage",
     driverCommissionValue: numeric(trip.driverCommissionValue),
     driverCommissionAmount: numeric(trip.driverCommissionAmount),
+    agentName: trip.agentName || null,
+    agentCommissionType: trip.agentCommissionType || "percentage",
+    agentCommissionValue: numeric(trip.agentCommissionValue),
+    agentCommissionAmount: numeric(trip.agentCommissionAmount),
     toll: numeric(trip.finalToll ?? trip.toll),
     parking: numeric(trip.parking),
     waitingCharge: numeric(trip.waitingCharge),
@@ -1932,6 +1936,13 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       ? driverCommissionValue
       : Math.round(commercialFare.customerTotal * (driverCommissionValue / 100) * 100) / 100;
 
+    const agentName = String(req.body.agentName || "").trim() || null;
+    const agentCommissionType = req.body.agentCommissionType === "flat" ? "flat" : "percentage";
+    const agentCommissionValue = Math.max(0, Number(req.body.agentCommissionValue || 0));
+    const agentCommissionAmount = agentCommissionType === "flat"
+      ? agentCommissionValue
+      : Math.round(commercialFare.customerTotal * (agentCommissionValue / 100) * 100) / 100;
+
     // Booking ID = financial year (Apr-Mar) as YYYY of start/end, then a running
     // number: FY 2026-27 -> "NG-2627001", "NG-2627002", ...
     const now = new Date();
@@ -2059,6 +2070,10 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       driverCommissionType,
       driverCommissionValue: String(driverCommissionValue),
       driverCommissionAmount: String(driverCommissionAmount),
+      agentName,
+      agentCommissionType,
+      agentCommissionValue: String(agentCommissionValue),
+      agentCommissionAmount: String(agentCommissionAmount),
       driverBata: String(commercialFare.driverBata),
       toll: String(commercialFare.toll),
       parking: String(commercialFare.parking),
@@ -2651,6 +2666,7 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
   const {
     ratePerKm: ratePerKmInput, pricingMode: pricingModeInput, packageTotal: packageTotalInput, discount,
     driverCommissionType: commissionTypeInput, driverCommissionValue: commissionValueInput,
+    agentName: agentNameInput, agentCommissionType: agentTypeInput, agentCommissionValue: agentValueInput,
   } = isOps ? req.body : ({} as Record<string, any>);
   const opsBilling = ratePerKmInput != null;
 
@@ -2683,6 +2699,9 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
     const discountAmount = discount != null ? numeric(discount) : numeric(trip.discount);
     const commissionType = commissionTypeInput === "flat" || commissionTypeInput === "percentage" ? commissionTypeInput : trip.driverCommissionType;
     const commissionValue = commissionValueInput != null ? numeric(commissionValueInput) : numeric(trip.driverCommissionValue);
+    const agentType = agentTypeInput === "flat" || agentTypeInput === "percentage" ? agentTypeInput : trip.agentCommissionType;
+    const agentValue = agentValueInput != null ? numeric(agentValueInput) : numeric(trip.agentCommissionValue);
+    const agentName = agentNameInput != null ? (String(agentNameInput).trim() || null) : trip.agentName;
     // A flat package trip keeps its agreed total regardless of actual meter
     // KM — only per-km trips get their base fare recalculated off the road.
     const pricingMode = opsBilling && pricingModeInput ? pricingModeInput : trip.pricingMode;
@@ -2702,6 +2721,10 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
       ? commissionValue
       : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
 
+    const agentCommissionAmount = agentType === "flat"
+      ? agentValue
+      : Math.round(customerTotal * (agentValue / 100) * 100) / 100;
+
     const [completed] = await db
       .update(tripsTable)
       .set({
@@ -2720,6 +2743,10 @@ router.post("/driver/trips/:id/complete", async (req, res): Promise<void> => {
         discount: String(discountAmount),
         driverCommissionType: commissionType,
         driverCommissionValue: String(commissionValue),
+        agentName,
+        agentCommissionType: agentType,
+        agentCommissionValue: String(agentValue),
+        agentCommissionAmount: String(agentCommissionAmount),
         ...(returnDate ? { returnDate: String(returnDate).slice(0, 10) } : {}),
         customerTotal: String(customerTotal),
         remainingBalance: String(remainingBalance),
@@ -2897,6 +2924,10 @@ router.post("/trips/:id/billing", async (req, res): Promise<void> => {
     const commissionType = b.driverCommissionType === "flat" ? "flat" : "percentage";
     const commissionValue = b.driverCommissionValue != null ? numeric(b.driverCommissionValue) : numeric(trip.driverCommissionValue);
 
+    const agentType = b.agentCommissionType === "flat" ? "flat" : "percentage";
+    const agentValue = b.agentCommissionValue != null ? numeric(b.agentCommissionValue) : numeric(trip.agentCommissionValue);
+    const agentName = b.agentName != null ? (String(b.agentName).trim() || null) : trip.agentName;
+
     const baseFare = pricingMode === "package"
       ? packageAmount
       : Math.round(actualKm * ratePerKm * 100) / 100;
@@ -2909,6 +2940,10 @@ router.post("/trips/:id/billing", async (req, res): Promise<void> => {
     const driverCommissionAmount = commissionType === "flat"
       ? commissionValue
       : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
+
+    const agentCommissionAmount = agentType === "flat"
+      ? agentValue
+      : Math.round(customerTotal * (agentValue / 100) * 100) / 100;
 
     const [updated] = await db
       .update(tripsTable)
@@ -2924,6 +2959,10 @@ router.post("/trips/:id/billing", async (req, res): Promise<void> => {
         driverCommissionType: commissionType,
         driverCommissionValue: String(commissionValue),
         driverCommissionAmount: String(driverCommissionAmount),
+        agentName,
+        agentCommissionType: agentType,
+        agentCommissionValue: String(agentValue),
+        agentCommissionAmount: String(agentCommissionAmount),
         ...(b.returnDate ? { returnDate: String(b.returnDate).slice(0, 10) } : {}),
         customerTotal: String(customerTotal),
         remainingBalance: String(remainingBalance),

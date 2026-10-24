@@ -79,6 +79,9 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
     trip?.driverCommissionType === "flat" ? "flat" : "percentage",
   );
   const [commissionValue, setCommissionValue] = useState<string>(() => String(Number(trip?.driverCommissionValue || 0) || ""));
+  const [agentName, setAgentName] = useState<string>(() => trip?.agentName || "");
+  const [agentType, setAgentType] = useState<"percentage" | "flat">(trip?.agentCommissionType === "flat" ? "flat" : "percentage");
+  const [agentValue, setAgentValue] = useState<string>(() => String(Number(trip?.agentCommissionValue || 0) || ""));
   const [parking, setParking] = useState<string>(() => String(Number(trip?.parking || 0) || ""));
   const [waiting, setWaiting] = useState<string>(() => String(Number(trip?.waitingCharge || 0) || ""));
   const [discount, setDiscount] = useState<string>(() => String(Number(trip?.discount || 0) || ""));
@@ -119,6 +122,9 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
   const commissionAmount = commissionType === "flat"
     ? Number(commissionValue || 0)
     : Math.round(customerTotal * (Number(commissionValue || 0) / 100) * 100) / 100;
+  const agentAmount = agentType === "flat"
+    ? Number(agentValue || 0)
+    : Math.round(customerTotal * (Number(agentValue || 0) / 100) * 100) / 100;
   const legKm = previous && enteredKm >= previous.km ? Math.round((enteredKm - previous.km) * 100) / 100 : 0;
 
   const handlePickPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,6 +177,9 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
             discount: Number(discount || 0),
             driverCommissionType: commissionType,
             driverCommissionValue: Number(commissionValue || 0),
+            agentName: agentName.trim(),
+            agentCommissionType: agentType,
+            agentCommissionValue: Number(agentValue || 0),
             ...(isRoundTrip && { returnDate }),
           }),
         });
@@ -257,6 +266,9 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
               discount: Number(discount || 0),
               driverCommissionType: commissionType,
               driverCommissionValue: Number(commissionValue || 0),
+              agentName: agentName.trim(),
+              agentCommissionType: agentType,
+              agentCommissionValue: Number(agentValue || 0),
               ...(isRoundTrip && { returnDate }),
             }),
           }
@@ -435,6 +447,25 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
                   </label>
                   <Input type="number" min={0} value={commissionValue} onChange={(e) => setCommissionValue(e.target.value)} className="bg-card border-border text-xs h-9 font-mono" />
                 </div>
+                <div className="flex items-center justify-between bg-background/70 border border-border rounded-lg px-3 py-2">
+                  <span className="text-[11px] font-bold text-foreground">
+                    {agentType === "flat" ? "Flat Value" : "Commission %"}
+                    <span className="block text-[10px] font-normal text-muted-foreground">Agent commission (internal)</span>
+                  </span>
+                  <Switch checked={agentType === "flat"} onCheckedChange={(c) => setAgentType(c ? "flat" : "percentage")} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[11px] text-foreground block mb-1">Agent Name</label>
+                    <Input value={agentName} onChange={(e) => setAgentName(e.target.value)} className="bg-card border-border text-xs h-9" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-foreground block mb-1">
+                      {agentType === "flat" ? "Agent Amount (₹)" : "Agent Commission (%)"}
+                    </label>
+                    <Input type="number" min={0} value={agentValue} onChange={(e) => setAgentValue(e.target.value)} className="bg-card border-border text-xs h-9 font-mono" />
+                  </div>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="text-[10px] text-muted-foreground block mb-1">Parking (₹)</label>
@@ -491,6 +522,12 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
                     <div className="flex justify-between items-center text-purple-700 dark:text-purple-400">
                       <span className="text-[11px] font-bold uppercase">Driver Commission {commissionType === "percentage" ? `(${commissionValue}%)` : "(Flat)"}:</span>
                       <span className="font-mono font-bold">{formatINR(commissionAmount)}</span>
+                    </div>
+                  )}
+                  {Number(agentValue || 0) > 0 && (
+                    <div className="flex justify-between items-center text-purple-700 dark:text-purple-400">
+                      <span className="text-[11px] font-bold uppercase">Agent Commission {agentType === "percentage" ? `(${agentValue}%)` : "(Flat)"}:</span>
+                      <span className="font-mono font-bold">{formatINR(agentAmount)}</span>
                     </div>
                   )}
                 </div>
