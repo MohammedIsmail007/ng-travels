@@ -7,6 +7,7 @@ import { Gauge, CheckCircle2, AlertCircle, Camera, X } from "lucide-react";
 import { formatINR } from "@/lib/fareEngine";
 import { Switch } from "@/components/ui/switch";
 import { TripActionLoader, ButtonLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 export interface DriverKmModalProps {
   isOpen: boolean;
@@ -326,7 +327,7 @@ export const DriverKmModal: React.FC<DriverKmModalProps> = ({
           <div className="space-y-4 pt-2 text-xs">
             <div className="bg-card/60 p-3 rounded-lg border border-border space-y-1">
               <div className="text-muted-foreground">Booking: <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">{trip.bookingId}</span></div>
-              <div className="text-foreground font-medium">{trip.pickup?.name} ➔ {trip.destination?.name}</div>
+              <div className="text-foreground font-medium">{routeLabel(trip.pickup, trip.stops, trip.destination)}</div>
               {previous && (
                 <div className="text-muted-foreground pt-1 border-t border-border flex justify-between">
                   <span>{previous.label}:</span>

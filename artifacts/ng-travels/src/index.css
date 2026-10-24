@@ -251,32 +251,3 @@ html, body, #root {
     opacity: 1 !important;
   }
 }
-/* Customer copy printing: show only the voucher, flowing onto a single page.
-   The dialog is portalled to <body>, so hide every other body child and undo
-   the dialog's fixed/centered/clipped layout. */
-@media print {
-  body.print-customer-copy > *:not([data-print-root]) {
-    display: none !important;
-  }
-  body.print-customer-copy [data-print-root] {
-    position: static !important;
-    transform: none !important;
-    animation: none !important;
-    max-width: none !important;
-    max-height: none !important;
-    width: 100% !important;
-    overflow: visible !important;
-    border: 0 !important;
-    box-shadow: none !important;
-  }
-  body.print-customer-copy [data-print-root] > div {
-    overflow: visible !important;
-    padding: 0 !important;
-  }
-  body.print-customer-copy [data-print-root] button[class*="absolute"] {
-    display: none !important;
-  }
-  @page {
-    margin: 10mm;
-  }
-}

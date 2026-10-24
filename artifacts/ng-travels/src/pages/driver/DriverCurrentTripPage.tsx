@@ -10,6 +10,7 @@ import { RealtimeFleetMap } from "@/components/maps/RealtimeFleetMap";
 import { ButtonLoader } from "@/components/loading";
 import { openExternalUrl } from "@/lib/openExternal";
 import { watchAccuratePosition } from "@/lib/nativeGeo";
+import { routeLabel } from "@/lib/tripRoute";
 
 interface DriverCurrentTripPageProps {
   trip: any;
@@ -152,7 +153,7 @@ export const DriverCurrentTripPage: React.FC<DriverCurrentTripPageProps> = ({
           <div>
             <span className="font-mono text-[10px] text-amber-700 dark:text-amber-400 font-bold">{trip.bookingId}</span>
             <h1 className="text-base font-extrabold text-foreground mt-0.5">
-              {trip.pickup?.name || trip.pickup?.address || "Pickup"} ➔ {trip.destination?.name || trip.destination?.address || "Destination"}
+              {routeLabel(trip.pickup, trip.stops, trip.destination)}
             </h1>
           </div>
           <div className="flex flex-col items-end gap-1">

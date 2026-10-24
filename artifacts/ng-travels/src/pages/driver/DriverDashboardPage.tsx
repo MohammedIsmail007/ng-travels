@@ -7,6 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatINR } from "@/lib/fareEngine";
 import { NGTravelsLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 interface DriverDashboardPageProps {
   todayTrips: any[];
@@ -64,7 +65,7 @@ export const DriverDashboardPage: React.FC<DriverDashboardPageProps> = ({
             <div>
               <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 font-mono">{activeTrip.bookingId}</span>
               <h2 className="text-base font-extrabold text-foreground">
-                {activeTrip.pickup?.name || activeTrip.pickup?.address || "Pickup"} ➔ {activeTrip.destination?.name || activeTrip.destination?.address || "Destination"}
+                {routeLabel(activeTrip.pickup, activeTrip.stops, activeTrip.destination)}
               </h2>
             </div>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${

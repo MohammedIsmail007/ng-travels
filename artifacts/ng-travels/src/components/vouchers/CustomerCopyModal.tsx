@@ -32,6 +32,23 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
 
   if (!trip) return null;
 
+  // Every charge that goes into customerTotal, so the lines always add up.
+  // Anything the breakdown can't explain (older trips) shows as one adjustment.
+  const n = (v: any) => Number(v || 0);
+  const chargeRows: { label: string; note: string; amount: number }[] = [
+    { label: "Driver Bata", note: `${n(trip.billableDays) || 1} day(s)`, amount: n(trip.driverBata) },
+    { label: "Highway Toll Charges", note: "At actuals", amount: n(trip.toll) },
+    { label: "Parking & Entry Fees", note: "At actuals", amount: n(trip.parking) },
+    { label: "State Permit / Entry Charges", note: "Approved Permit", amount: n(trip.permitCharge) },
+    { label: "Waiting Charges", note: "At actuals", amount: n(trip.waitingCharge) },
+    { label: "Night Charges", note: "", amount: n(trip.nightCharge) },
+    { label: "Tax / GST", note: "", amount: n(trip.tax) },
+  ].filter((r) => r.amount > 0);
+  const discountAmount = n(trip.discount);
+  const explained = n(trip.baseFare) + chargeRows.reduce((sum, r) => sum + r.amount, 0) - discountAmount;
+  const unexplained = Math.round((n(trip.customerTotal) - explained) * 100) / 100;
+  const isCompleted = trip.status === "completed";
+
   // In-between stops, numbered, with a leg tag when a round-trip stop applies
   // to only one direction.
   const stopList: any[] = Array.isArray(trip.stops) ? trip.stops : [];
@@ -42,20 +59,62 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
   const legTag = (stop: any) =>
     stop.leg === "outbound" ? " — outbound only" : stop.leg === "return" ? " — return only" : "";
 
-  // Print only the voucher: the global print rules (index.css) hide the rest of
-  // the app while body has this class, and the light theme is forced for paper.
+  // Print the voucher from a hidden iframe holding a copy of it plus the app's
+  // stylesheets. Printing the live page would drag the dialog, its overlay and
+  // the whole app behind it into the output.
   const handlePrint = () => {
-    const root = document.documentElement;
-    const wasDark = root.classList.contains("dark");
-    document.body.classList.add("print-customer-copy");
-    if (wasDark) root.classList.remove("dark");
-    const restore = () => {
-      document.body.classList.remove("print-customer-copy");
-      if (wasDark) root.classList.add("dark");
-      window.removeEventListener("afterprint", restore);
-    };
-    window.addEventListener("afterprint", restore);
-    window.print();
+    const node = printRef.current;
+    if (!node) return;
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(iframe);
+    const doc = iframe.contentDocument;
+    const win = iframe.contentWindow;
+    if (!doc || !win) {
+      iframe.remove();
+      return;
+    }
+    doc.open();
+    doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${trip.bookingId} - Customer Copy</title></head><body></body></html>`);
+    doc.close();
+
+    const sheets = Array.from(document.querySelectorAll<HTMLElement>('link[rel="stylesheet"], style'));
+    const loaded = sheets.map(
+      (sheet) =>
+        new Promise<void>((resolve) => {
+          const copy = sheet.cloneNode(true) as HTMLElement;
+          if (copy instanceof HTMLLinkElement) {
+            copy.onload = () => resolve();
+            copy.onerror = () => resolve();
+          } else {
+            resolve();
+          }
+          doc.head.appendChild(copy);
+        }),
+    );
+    const paper = doc.createElement("style");
+    paper.textContent =
+      "@page{margin:10mm}html,body{margin:0;background:#fff!important}" +
+      "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}" +
+      "[data-print-voucher]{overflow:visible!important;max-height:none!important;padding:0!important}";
+    doc.head.appendChild(paper);
+
+    // The iframe has no `dark` class, so the voucher prints in the light theme.
+    const copy = node.cloneNode(true) as HTMLElement;
+    copy.setAttribute("data-print-voucher", "");
+    doc.body.appendChild(copy);
+
+    const cleanup = () => iframe.remove();
+    win.addEventListener("afterprint", cleanup);
+    Promise.all(loaded).then(() => {
+      // let images (the logo) and layout settle before the print dialog opens
+      setTimeout(() => {
+        win.focus();
+        win.print();
+        setTimeout(cleanup, 60000);
+      }, 300);
+    });
   };
 
   const handleWhatsApp = () => {
@@ -73,7 +132,7 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
       `Route: ${[pickup, ...stopList.map((s) => s.name || s.address || "Stop"), dest].join(" ➔ ")}\n` +
       `Date & Time: ${date} at ${trip.startTime}\n` +
       `Billing KM: ${trip.billingKm} km${trip.pricingMode === "package" ? " (Package Rate)" : ` @ ₹${trip.ratePerKm}/km`}\n` +
-      `Total Estimated Fare: ₹${trip.customerTotal}\n` +
+      `${trip.status === "completed" ? "Total Fare" : "Total Estimated Fare"}: ₹${trip.customerTotal}\n` +
       `Advance Paid: ₹${trip.totalPaid}\n` +
       `Balance Due: ₹${trip.remainingBalance}\n\n` +
       `Thank you for travelling with ${companyInfo.company}!\nHelpdesk: ${companyInfo.mobile}`;
@@ -88,7 +147,7 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent data-print-root className="max-w-2xl bg-background text-foreground border-border p-0 overflow-hidden max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-2xl bg-background text-foreground border-border p-0 overflow-hidden max-h-[90vh] flex flex-col">
         {/* Header Actions */}
         <div className="print:hidden flex items-center justify-between flex-wrap gap-2 pl-6 pr-12 py-4 border-b border-border bg-card/80 shrink-0">
           <div className="flex items-center flex-wrap gap-2.5">
@@ -202,31 +261,31 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
                   </td>
                   <td className="text-right font-medium text-foreground">{formatINR(trip.baseFare)}</td>
                 </tr>
-                {Number(trip.toll || 0) > 0 && (
+                {chargeRows.map((r) => (
+                  <tr key={r.label}>
+                    <td className="py-2 text-foreground">{r.label}</td>
+                    <td className="text-right text-muted-foreground">{r.note}</td>
+                    <td className="text-right text-foreground">{formatINR(r.amount)}</td>
+                  </tr>
+                ))}
+                {discountAmount > 0 && (
                   <tr>
-                    <td className="py-2 text-foreground">Highway Toll Charges</td>
-                    <td className="text-right text-muted-foreground">At actuals</td>
-                    <td className="text-right text-foreground">{formatINR(trip.toll)}</td>
+                    <td className="py-2 text-foreground">Discount</td>
+                    <td className="text-right text-muted-foreground"></td>
+                    <td className="text-right text-emerald-700 dark:text-emerald-400">-{formatINR(discountAmount)}</td>
                   </tr>
                 )}
-                {Number(trip.parking || 0) > 0 && (
+                {Math.abs(unexplained) >= 0.01 && (
                   <tr>
-                    <td className="py-2 text-foreground">Parking & Entry Fees</td>
-                    <td className="text-right text-muted-foreground">At actuals</td>
-                    <td className="text-right text-foreground">{formatINR(trip.parking)}</td>
-                  </tr>
-                )}
-                {Number(trip.permitCharge || 0) > 0 && (
-                  <tr>
-                    <td className="py-2 text-foreground">State Permit / Entry Charges</td>
-                    <td className="text-right text-muted-foreground">Approved Permit</td>
-                    <td className="text-right text-foreground">{formatINR(trip.permitCharge)}</td>
+                    <td className="py-2 text-foreground">Other Adjustments</td>
+                    <td className="text-right text-muted-foreground"></td>
+                    <td className="text-right text-foreground">{unexplained < 0 ? "-" : ""}{formatINR(Math.abs(unexplained))}</td>
                   </tr>
                 )}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border">
-                  <td colSpan={2} className="py-2.5 font-bold text-foreground text-sm">Customer Total Estimated Fare</td>
+                  <td colSpan={2} className="py-2.5 font-bold text-foreground text-sm">{isCompleted ? "Total Fare" : "Customer Total Estimated Fare"}</td>
                   <td className="text-right font-bold text-amber-700 dark:text-amber-400 text-sm">{formatINR(trip.customerTotal)}</td>
                 </tr>
                 <tr className="border-b border-border/60">
@@ -234,7 +293,7 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
                   <td className="text-right font-medium text-emerald-700 dark:text-emerald-400">-{formatINR(trip.totalPaid)}</td>
                 </tr>
                 <tr className="bg-amber-950/20 font-bold">
-                  <td colSpan={2} className="py-2.5 text-amber-700 dark:text-amber-300 text-sm pl-2">Balance Due at Trip Completion</td>
+                  <td colSpan={2} className="py-2.5 text-amber-700 dark:text-amber-300 text-sm pl-2">{isCompleted ? "Balance Due" : "Balance Due at Trip Completion"}</td>
                   <td className="text-right font-bold text-amber-700 dark:text-amber-300 text-sm pr-2">{formatINR(trip.remainingBalance)}</td>
                 </tr>
               </tfoot>

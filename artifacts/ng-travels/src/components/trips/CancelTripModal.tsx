@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AlertCircle, XCircle } from "lucide-react";
 import { formatINR } from "@/lib/fareEngine";
 import { ButtonLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 export interface CancelTripModalProps {
   isOpen: boolean;
@@ -58,7 +59,7 @@ export const CancelTripModal: React.FC<CancelTripModalProps> = ({
         <div className="space-y-4 pt-2 text-xs">
           <div className="bg-card/60 p-3 rounded-lg border border-border space-y-1">
             <div className="text-muted-foreground">Booking ID: <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">{trip.bookingId}</span></div>
-            <div className="text-foreground font-semibold">{trip.pickup?.name} ➔ {trip.destination?.name}</div>
+            <div className="text-foreground font-semibold">{routeLabel(trip.pickup, trip.stops, trip.destination)}</div>
             <div className="text-muted-foreground">Customer: {trip.customerName} ({trip.customerMobile})</div>
           </div>
 

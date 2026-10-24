@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Calendar, Navigation, MapPin, User, Clock, ArrowRight, Gauge, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NGTravelsLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 interface DriverTodayPageProps {
   todayTrips: any[];
@@ -50,7 +51,7 @@ export const DriverTodayPage: React.FC<DriverTodayPageProps> = ({
                 <div>
                   <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-400">{trip.bookingId}</span>
                   <h3 className="font-bold text-sm text-foreground mt-0.5">
-                    {trip.pickup?.name || trip.pickup?.address || "Pickup"} ➔ {trip.destination?.name || trip.destination?.address || "Destination"}
+                    {routeLabel(trip.pickup, trip.stops, trip.destination)}
                   </h3>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${

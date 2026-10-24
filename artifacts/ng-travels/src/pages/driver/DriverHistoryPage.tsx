@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { formatINR } from "@/lib/fareEngine";
 import { NGTravelsLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 export const DriverHistoryPage: React.FC = () => {
   const { data: trips = [], isLoading } = useQuery({
@@ -72,7 +73,7 @@ export const DriverHistoryPage: React.FC = () => {
                 <div>
                   <span className="font-mono text-[10px] font-bold text-amber-700 dark:text-amber-400">{t.bookingId}</span>
                   <h3 className="text-sm font-extrabold text-foreground mt-0.5">
-                    {t.pickup?.name} ➔ {t.destination?.name}
+                    {routeLabel(t.pickup, t.stops, t.destination)}
                   </h3>
                 </div>
                 <span className="bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">

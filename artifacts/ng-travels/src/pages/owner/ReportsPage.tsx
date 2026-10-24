@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatINR, formatKM } from "@/lib/fareEngine";
 import { exportTripsToXLSX } from "@/lib/xlsxExport";
+import { routeLabel } from "@/lib/tripRoute";
 
 interface ReportsPageProps {
   trips: any[];
@@ -254,7 +255,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     <td className="py-3 px-4 text-foreground">{new Date(trip.startDate).toLocaleDateString("en-IN")}</td>
                     <td className="py-3 px-4 font-semibold text-foreground">{trip.customerName || "Customer"}</td>
                     <td className="py-3 px-4 text-foreground truncate max-w-[160px]">
-                      {trip.pickup?.name || trip.pickup?.address || "Pickup"} ➔ {trip.destination?.name || trip.destination?.address || "Destination"}
+                      {routeLabel(trip.pickup, trip.stops, trip.destination)}
                     </td>
                     <td className="py-3 px-4 font-mono text-foreground">{trip.billingKm} km</td>
                     <td className="py-3 px-4 text-right font-mono text-muted-foreground">{formatINR(trip.permitCharge || 0)}</td>

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { UserCog } from "lucide-react";
 import { ButtonLoader } from "@/components/loading";
+import { routeLabel } from "@/lib/tripRoute";
 
 export interface AssignDriverModalProps {
   isOpen: boolean;
@@ -79,7 +80,7 @@ export const AssignDriverModal: React.FC<AssignDriverModalProps> = ({
               Booking ID: <span className="font-mono text-amber-700 dark:text-amber-400 font-bold">{trip.bookingId}</span>
             </div>
             <div className="text-foreground font-semibold">
-              {trip.pickup?.name} ➔ {trip.destination?.name}
+              {routeLabel(trip.pickup, trip.stops, trip.destination)}
             </div>
             <div className="text-muted-foreground">
               Customer: {trip.customerName} ({trip.customerMobile})

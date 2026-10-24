@@ -87407,6 +87407,12 @@ var tripsTable = pgTable(
     driverCommissionType: text("driver_commission_type").notNull().default("percentage"),
     driverCommissionValue: numeric("driver_commission_value", { precision: 12, scale: 2 }).notNull().default("0"),
     driverCommissionAmount: numeric("driver_commission_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+    // Agent who brought the booking — same percentage/flat model as the driver
+    // commission. Internal reference only, never shown to the customer.
+    agentName: text("agent_name"),
+    agentCommissionType: text("agent_commission_type").notNull().default("percentage"),
+    agentCommissionValue: numeric("agent_commission_value", { precision: 12, scale: 2 }).notNull().default("0"),
+    agentCommissionAmount: numeric("agent_commission_amount", { precision: 12, scale: 2 }).notNull().default("0"),
     toll: numeric("toll", { precision: 12, scale: 2 }).notNull().default("0"),
     parking: numeric("parking", { precision: 12, scale: 2 }).notNull().default("0"),
     permitCharge: numeric("permit_charge", { precision: 12, scale: 2 }).notNull().default("0"),
@@ -97024,6 +97030,10 @@ function tripView(trip, customer) {
     driverCommissionType: trip.driverCommissionType || "percentage",
     driverCommissionValue: numeric2(trip.driverCommissionValue),
     driverCommissionAmount: numeric2(trip.driverCommissionAmount),
+    agentName: trip.agentName || null,
+    agentCommissionType: trip.agentCommissionType || "percentage",
+    agentCommissionValue: numeric2(trip.agentCommissionValue),
+    agentCommissionAmount: numeric2(trip.agentCommissionAmount),
     toll: numeric2(trip.finalToll ?? trip.toll),
     parking: numeric2(trip.parking),
     waitingCharge: numeric2(trip.waitingCharge),
@@ -97234,28 +97244,26 @@ router2.post("/auth/driver-password-reset-request", async (req, res) => {
   }
 });
 router2.post("/admin/drivers", requireOwner, async (req, res) => {
-  const { name, driverCode, mobile, email: email3, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
-  if (!name || !driverCode || !mobile || !initialPassword) {
+  const { name, driverCode, mobile, licenseNumber, licenseExpiry, emergencyContact, initialPassword } = req.body;
+  if (!name || !driverCode || !mobile || !String(licenseNumber ?? "").trim() || !initialPassword) {
     res.status(400).json({
       success: false,
-      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, and initial password are required." }
+      error: { code: "VALIDATION_ERROR", message: "Name, driver code, mobile, license number, and initial password are required." }
     });
     return;
   }
-  const contactEmail = email3 ? String(email3).toLowerCase().trim() || null : null;
   try {
     const [driver] = await db.insert(driversTable).values({
       name,
       driverCode: driverCode.toUpperCase(),
       mobile,
-      email: contactEmail,
-      licenseNumber: licenseNumber || null,
+      licenseNumber: String(licenseNumber).trim(),
       licenseExpiry: licenseExpiry || null,
       emergencyContact: emergencyContact || null,
       status: "active"
     }).returning();
-    const { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
-      email: driverAuthEmail(driverCode.toUpperCase()),
+    const authEmail = driverAuthEmail(driverCode.toUpperCase());
+    const authAttrs = {
       phone: toE164(mobile),
       password: initialPassword,
       email_confirm: true,
@@ -97265,7 +97273,34 @@ router2.post("/admin/drivers", requireOwner, async (req, res) => {
         role: "driver",
         driver_id: driver.id
       }
+    };
+    let { data: authData, error: authError } = await supabaseServer.auth.admin.createUser({
+      email: authEmail,
+      ...authAttrs
     });
+    if (authError && /already.*registered|already exists/i.test(authError.message)) {
+      let existing;
+      for (let page = 1; page <= 10 && !existing; page++) {
+        const { data: list, error: listError } = await supabaseServer.auth.admin.listUsers({ page, perPage: 1e3 });
+        if (listError || !list?.users?.length) break;
+        existing = list.users.find((u) => u.email?.toLowerCase() === authEmail);
+        if (list.users.length < 1e3) break;
+      }
+      const ownerId = Number(existing?.user_metadata?.driver_id);
+      const [ownerDriver] = ownerId ? await db.select({ id: driversTable.id }).from(driversTable).where(eq(driversTable.id, ownerId)) : [];
+      if (existing && !ownerDriver) {
+        const { data: updated, error: updateError } = await supabaseServer.auth.admin.updateUserById(existing.id, authAttrs);
+        authData = updated;
+        authError = updateError;
+      } else {
+        await db.delete(driversTable).where(eq(driversTable.id, driver.id));
+        res.status(409).json({
+          success: false,
+          error: { code: "DRIVER_CODE_TAKEN", message: `Driver code ${driverCode.toUpperCase()} is already in use.` }
+        });
+        return;
+      }
+    }
     if (authError || !authData?.user) {
       await db.delete(driversTable).where(eq(driversTable.id, driver.id));
       res.status(400).json({
@@ -97276,7 +97311,6 @@ router2.post("/admin/drivers", requireOwner, async (req, res) => {
     }
     await db.update(usersTable).set({
       name,
-      ...contactEmail ? { email: contactEmail } : {},
       phone: mobile,
       role: "driver",
       driverId: driver.id,
@@ -97289,12 +97323,18 @@ router2.post("/admin/drivers", requireOwner, async (req, res) => {
         id: driver.id,
         name: driver.name,
         driverCode: driver.driverCode,
-        mobile: driver.mobile,
-        email: driver.email
+        mobile: driver.mobile
       }
     });
   } catch (err) {
-    console.error("[admin] Create driver error:", err);
+    console.error("[admin] Create driver error:", err, err?.cause);
+    if ((err?.code ?? err?.cause?.code) === "23505") {
+      res.status(409).json({
+        success: false,
+        error: { code: "DRIVER_CODE_TAKEN", message: `Driver code ${String(driverCode).toUpperCase()} is already in use.` }
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       error: { code: "SERVER_ERROR", message: "Unable to create driver account." }
@@ -98247,12 +98287,21 @@ router2.post("/trips", requireOwner, async (req, res) => {
     const driverCommissionType = req.body.driverCommissionType === "flat" ? "flat" : "percentage";
     const driverCommissionValue = Math.max(0, Number(req.body.driverCommissionValue || 0));
     const driverCommissionAmount = driverCommissionType === "flat" ? driverCommissionValue : Math.round(commercialFare.customerTotal * (driverCommissionValue / 100) * 100) / 100;
+    const agentName = String(req.body.agentName || "").trim() || null;
+    const agentCommissionType = req.body.agentCommissionType === "flat" ? "flat" : "percentage";
+    const agentCommissionValue = Math.max(0, Number(req.body.agentCommissionValue || 0));
+    const agentCommissionAmount = agentCommissionType === "flat" ? agentCommissionValue : Math.round(commercialFare.customerTotal * (agentCommissionValue / 100) * 100) / 100;
     const now = /* @__PURE__ */ new Date();
     const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyPrefix = `${String(fyStart).slice(-2)}${String(fyStart + 1).slice(-2)}`;
     const idPrefix = `NG-${fyPrefix}`;
-    const [{ maxSeq }] = await db.select({ maxSeq: sql`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` }).from(tripsTable).where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
-    const bookingId = `${idPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
+    let lastSeq = 0;
+    const nextBookingId = async () => {
+      const [{ maxSeq }] = await db.select({ maxSeq: sql`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` }).from(tripsTable).where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
+      lastSeq = Math.max(Number(maxSeq), lastSeq) + 1;
+      return `${idPrefix}${String(lastSeq).padStart(3, "0")}`;
+    };
+    let bookingId = await nextBookingId();
     let driverName = req.body.driverName || null;
     let driverMobile = req.body.driverMobile || null;
     if (req.body.driverId) {
@@ -98358,6 +98407,10 @@ router2.post("/trips", requireOwner, async (req, res) => {
       driverCommissionType,
       driverCommissionValue: String(driverCommissionValue),
       driverCommissionAmount: String(driverCommissionAmount),
+      agentName,
+      agentCommissionType,
+      agentCommissionValue: String(agentCommissionValue),
+      agentCommissionAmount: String(agentCommissionAmount),
       driverBata: String(commercialFare.driverBata),
       toll: String(commercialFare.toll),
       parking: String(commercialFare.parking),
@@ -98376,7 +98429,18 @@ router2.post("/trips", requireOwner, async (req, res) => {
       status: req.body.driverId ? "assigned" : "upcoming",
       isLocked: false
     };
-    const [created] = await db.insert(tripsTable).values(tripData).returning();
+    let created;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        [created] = await db.insert(tripsTable).values({ ...tripData, bookingId }).returning();
+        break;
+      } catch (insertErr) {
+        const cause = insertErr?.cause ?? insertErr;
+        const bookingIdTaken = cause?.code === "23505" && String(cause?.constraint ?? "").includes("booking_id");
+        if (!bookingIdTaken || attempt >= 5) throw insertErr;
+        bookingId = await nextBookingId();
+      }
+    }
     if (commercialFare.totalPaid > 0) {
       await db.insert(paymentsTable).values({
         tripId: created.id,
@@ -98762,7 +98826,10 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
     packageTotal: packageTotalInput,
     discount,
     driverCommissionType: commissionTypeInput,
-    driverCommissionValue: commissionValueInput
+    driverCommissionValue: commissionValueInput,
+    agentName: agentNameInput,
+    agentCommissionType: agentTypeInput,
+    agentCommissionValue: agentValueInput
   } = isOps ? req.body : {};
   const opsBilling = ratePerKmInput != null;
   try {
@@ -98788,6 +98855,9 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
     const discountAmount = discount != null ? numeric2(discount) : numeric2(trip.discount);
     const commissionType = commissionTypeInput === "flat" || commissionTypeInput === "percentage" ? commissionTypeInput : trip.driverCommissionType;
     const commissionValue = commissionValueInput != null ? numeric2(commissionValueInput) : numeric2(trip.driverCommissionValue);
+    const agentType = agentTypeInput === "flat" || agentTypeInput === "percentage" ? agentTypeInput : trip.agentCommissionType;
+    const agentValue = agentValueInput != null ? numeric2(agentValueInput) : numeric2(trip.agentCommissionValue);
+    const agentName = agentNameInput != null ? String(agentNameInput).trim() || null : trip.agentName;
     const pricingMode = opsBilling && pricingModeInput ? pricingModeInput : trip.pricingMode;
     const packageAmount = opsBilling && packageTotalInput != null ? numeric2(packageTotalInput) : numeric2(trip.packageTotal);
     const recalculatedBase = pricingMode === "package" ? opsBilling ? packageAmount : numeric2(trip.baseFare) : Math.round(chargedKm * ratePerKm * 100) / 100;
@@ -98796,6 +98866,7 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
     const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
     const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
     const driverCommissionAmount = commissionType === "flat" ? commissionValue : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
+    const agentCommissionAmount = agentType === "flat" ? agentValue : Math.round(customerTotal * (agentValue / 100) * 100) / 100;
     const [completed] = await db.update(tripsTable).set({
       status: "completed",
       endingKm: String(endKm),
@@ -98812,6 +98883,10 @@ router2.post("/driver/trips/:id/complete", async (req, res) => {
       discount: String(discountAmount),
       driverCommissionType: commissionType,
       driverCommissionValue: String(commissionValue),
+      agentName,
+      agentCommissionType: agentType,
+      agentCommissionValue: String(agentValue),
+      agentCommissionAmount: String(agentCommissionAmount),
       ...returnDate ? { returnDate: String(returnDate).slice(0, 10) } : {},
       customerTotal: String(customerTotal),
       remainingBalance: String(remainingBalance),
@@ -98944,6 +99019,9 @@ router2.post("/trips/:id/billing", async (req, res) => {
     const discountAmount = b.discount != null ? numeric2(b.discount) : numeric2(trip.discount);
     const commissionType = b.driverCommissionType === "flat" ? "flat" : "percentage";
     const commissionValue = b.driverCommissionValue != null ? numeric2(b.driverCommissionValue) : numeric2(trip.driverCommissionValue);
+    const agentType = b.agentCommissionType === "flat" ? "flat" : "percentage";
+    const agentValue = b.agentCommissionValue != null ? numeric2(b.agentCommissionValue) : numeric2(trip.agentCommissionValue);
+    const agentName = b.agentName != null ? String(b.agentName).trim() || null : trip.agentName;
     const baseFare = pricingMode === "package" ? packageAmount : Math.round(actualKm * ratePerKm * 100) / 100;
     const customerTotal = Math.round(
       (baseFare + numeric2(trip.finalToll) + parkingAmount + numeric2(trip.permitCharge) + waitingAmount - discountAmount) * 100
@@ -98952,6 +99030,7 @@ router2.post("/trips/:id/billing", async (req, res) => {
     const remainingBalance = Math.max(0, Math.round((customerTotal - totalPaid) * 100) / 100);
     const credit = Math.max(0, Math.round((totalPaid - customerTotal) * 100) / 100);
     const driverCommissionAmount = commissionType === "flat" ? commissionValue : Math.round(customerTotal * (commissionValue / 100) * 100) / 100;
+    const agentCommissionAmount = agentType === "flat" ? agentValue : Math.round(customerTotal * (agentValue / 100) * 100) / 100;
     const [updated] = await db.update(tripsTable).set({
       pricingMode,
       packageTotal: pricingMode === "package" ? String(packageAmount) : null,
@@ -98964,6 +99043,10 @@ router2.post("/trips/:id/billing", async (req, res) => {
       driverCommissionType: commissionType,
       driverCommissionValue: String(commissionValue),
       driverCommissionAmount: String(driverCommissionAmount),
+      agentName,
+      agentCommissionType: agentType,
+      agentCommissionValue: String(agentValue),
+      agentCommissionAmount: String(agentCommissionAmount),
       ...b.returnDate ? { returnDate: String(b.returnDate).slice(0, 10) } : {},
       customerTotal: String(customerTotal),
       remainingBalance: String(remainingBalance),
@@ -99360,13 +99443,13 @@ router2.get("/settings", requireOwner, async (_req, res) => {
   res.json(await settingsView());
 });
 var CURRENT_APP_VERSION = {
-  versionCode: 17,
-  versionName: "1.3.9",
+  versionCode: 19,
+  versionName: "1.4.1",
   // Landing page, not the APK itself: builds up to 1.3.4 open this link in a
   // Chrome Custom Tab, where APK downloads stall at 100%. The page hands the
   // download to full Chrome (see artifacts/ng-travels/public/update.html).
   url: "https://ng-travels-operations-black.vercel.app/update.html",
-  releaseNotes: "Faster, lighter data usage: trip and dashboard lists now load only what they need, receipts and odometer photos are cached on the device, and old GPS history is cleaned up automatically."
+  releaseNotes: "Driver email is now optional, a leftover login for a driver code no longer blocks creating a driver, and the installed app version is shown in Settings and the driver profile."
 };
 var APP_VERSIONS = {
   owner: CURRENT_APP_VERSION,

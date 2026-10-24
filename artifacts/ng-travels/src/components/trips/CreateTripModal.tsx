@@ -1736,7 +1736,7 @@ export const CreateTripModal: React.FC<CreateTripModalProps> = ({
                 <div className="bg-card/60 p-3 rounded-xl border border-border/80 text-xs space-y-1">
                   <div className="text-foreground font-medium flex items-center gap-1.5">
                     <Navigation className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-                    <span>{pickupInput} ➔ {destInput}</span>
+                    <span>{[pickupInput, ...stops.map((s) => s.name || s.address), destInput].filter(Boolean).join(" ➔ ")}</span>
                   </div>
                   <div className="text-muted-foreground text-[11px]">
                     {startDate} at {startTime} • {tripType.replaceAll("_", " ")}
