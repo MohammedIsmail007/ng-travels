@@ -2884,8 +2884,9 @@ router.post("/trips/:id/stand-return", async (req, res): Promise<void> => {
     broadcastRealtimeEvent("TRIP_UPDATED", view);
     res.json(view);
   } catch (err: any) {
-    console.error("[trips/stand-return] Error:", err);
-    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
+    console.error("[trips/stand-return] Error:", err, err?.cause);
+    const reason = err?.cause?.message || err?.message;
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: reason ? `Failed to record back-at-stand KM: ${reason}` : "Failed to record back-at-stand KM" } });
   }
 });
 
