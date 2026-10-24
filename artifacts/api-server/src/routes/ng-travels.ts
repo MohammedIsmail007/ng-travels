@@ -1938,11 +1938,17 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
     const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
     const fyPrefix = `${String(fyStart).slice(-2)}${String(fyStart + 1).slice(-2)}`;
     const idPrefix = `NG-${fyPrefix}`;
-    const [{ maxSeq }] = await db
-      .select({ maxSeq: sql<number>`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` })
-      .from(tripsTable)
-      .where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
-    const bookingId = `${idPrefix}${String(Number(maxSeq) + 1).padStart(3, "0")}`;
+    let lastSeq = 0;
+    const nextBookingId = async (): Promise<string> => {
+      const [{ maxSeq }] = await db
+        .select({ maxSeq: sql<number>`coalesce(max((substring(${tripsTable.bookingId} from ${idPrefix.length + 1}))::int), 0)` })
+        .from(tripsTable)
+        .where(sql`${tripsTable.bookingId} ~ ${`^${idPrefix}[0-9]+$`}`);
+      // lastSeq keeps a retry moving forward even if the lookup returns a stale max
+      lastSeq = Math.max(Number(maxSeq), lastSeq) + 1;
+      return `${idPrefix}${String(lastSeq).padStart(3, "0")}`;
+    };
+    let bookingId = await nextBookingId();
 
     let driverName: string | null = req.body.driverName || null;
     let driverMobile: string | null = req.body.driverMobile || null;
@@ -2072,7 +2078,20 @@ router.post("/trips", requireOwner, async (req, res): Promise<void> => {
       isLocked: false,
     };
 
-    const [created] = await db.insert(tripsTable).values(tripData as any).returning();
+    // The unique index on booking_id is the real guard against duplicate IDs: if
+    // a concurrent booking took the same number, take the next one and retry.
+    let created: typeof tripsTable.$inferSelect;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        [created] = await db.insert(tripsTable).values({ ...tripData, bookingId } as any).returning();
+        break;
+      } catch (insertErr: any) {
+        const cause = insertErr?.cause ?? insertErr;
+        const bookingIdTaken = cause?.code === "23505" && String(cause?.constraint ?? "").includes("booking_id");
+        if (!bookingIdTaken || attempt >= 5) throw insertErr;
+        bookingId = await nextBookingId();
+      }
+    }
 
     // If advance payment recorded
     if (commercialFare.totalPaid > 0) {
