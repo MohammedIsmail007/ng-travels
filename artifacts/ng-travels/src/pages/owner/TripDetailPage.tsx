@@ -212,7 +212,8 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
                   <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">Waypoints & Stops</span>
                   {trip.stops.map((s: any, idx: number) => (
                     <div key={idx} className="text-xs text-foreground mt-0.5">
-                      • {s.name || s.address} {s.address && s.name ? `(${s.address})` : ""}
+                      {idx + 1}. {s.name || s.address}{s.address && s.name && s.address !== s.name ? ` (${s.address})` : ""}
+                      {s.leg === "outbound" ? " — outbound only" : s.leg === "return" ? " — return only" : ""}
                     </div>
                   ))}
                 </div>

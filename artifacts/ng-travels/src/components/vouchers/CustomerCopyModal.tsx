@@ -32,7 +32,29 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
 
   if (!trip) return null;
 
+  // In-between stops, numbered, with a leg tag when a round-trip stop applies
+  // to only one direction.
+  const stopList: any[] = Array.isArray(trip.stops) ? trip.stops : [];
+  const stopLabel = (stop: any) => {
+    const name = stop.name || stop.address || "Stop";
+    return stop.address && stop.name && stop.address !== stop.name ? `${name} (${stop.address})` : name;
+  };
+  const legTag = (stop: any) =>
+    stop.leg === "outbound" ? " — outbound only" : stop.leg === "return" ? " — return only" : "";
+
+  // Print only the voucher: the global print rules (index.css) hide the rest of
+  // the app while body has this class, and the light theme is forced for paper.
   const handlePrint = () => {
+    const root = document.documentElement;
+    const wasDark = root.classList.contains("dark");
+    document.body.classList.add("print-customer-copy");
+    if (wasDark) root.classList.remove("dark");
+    const restore = () => {
+      document.body.classList.remove("print-customer-copy");
+      if (wasDark) root.classList.add("dark");
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
     window.print();
   };
 
@@ -48,7 +70,7 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
       `*NG Travels Booking Confirmation*\n` +
       `Booking ID: ${trip.bookingId}\n` +
       `Customer: ${trip.customerName}\n` +
-      `Route: ${pickup} ➔ ${dest}\n` +
+      `Route: ${[pickup, ...stopList.map((s) => s.name || s.address || "Stop"), dest].join(" ➔ ")}\n` +
       `Date & Time: ${date} at ${trip.startTime}\n` +
       `Billing KM: ${trip.billingKm} km${trip.pricingMode === "package" ? " (Package Rate)" : ` @ ₹${trip.ratePerKm}/km`}\n` +
       `Total Estimated Fare: ₹${trip.customerTotal}\n` +
@@ -66,9 +88,9 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl bg-background text-foreground border-border p-0 overflow-hidden max-h-[90vh] flex flex-col">
+      <DialogContent data-print-root className="max-w-2xl bg-background text-foreground border-border p-0 overflow-hidden max-h-[90vh] flex flex-col">
         {/* Header Actions */}
-        <div className="flex items-center justify-between flex-wrap gap-2 pl-6 pr-12 py-4 border-b border-border bg-card/80 shrink-0">
+        <div className="print:hidden flex items-center justify-between flex-wrap gap-2 pl-6 pr-12 py-4 border-b border-border bg-card/80 shrink-0">
           <div className="flex items-center flex-wrap gap-2.5">
             <img src="/logo.png" alt="NG Travels" className="w-8 h-8 rounded-lg object-contain bg-black border border-amber-300 dark:border-amber-500/30 p-0.5" />
             <div>
@@ -141,12 +163,12 @@ export const CustomerCopyModal: React.FC<CustomerCopyProps> = ({
                 <div className="text-foreground font-medium">{trip.pickup?.name}</div>
                 <div className="text-xs text-muted-foreground">{trip.pickup?.address}</div>
               </div>
-              {Array.isArray(trip.stops) && trip.stops.length > 0 && (
+              {stopList.length > 0 && (
                 <div className="pt-1">
                   <div className="text-xs text-amber-700 dark:text-amber-400 font-semibold">STOPS EN ROUTE</div>
-                  {trip.stops.map((stop: any, idx: number) => (
+                  {stopList.map((stop: any, idx: number) => (
                     <div key={idx} className="text-xs text-foreground mt-0.5">
-                      • {stop.name} {stop.address ? `(${stop.address})` : ""}
+                      {idx + 1}. {stopLabel(stop)}{legTag(stop)}
                     </div>
                   ))}
                 </div>
