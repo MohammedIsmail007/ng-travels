@@ -27,6 +27,7 @@ export interface TripExportRow {
   standToPickupKm?: number | null;
   dropToStandKm?: number | null;
   expenseTotal?: number;
+  expenseBreakdown?: Record<string, number>;
   profit?: number;
   paymentStatus: string;
   status: string;
@@ -62,6 +63,10 @@ export function exportTripsToXLSX(
     "Stand In KM": t.standReturnKm ?? "-",
     "Stand → Pickup KM": t.standToPickupKm ?? "-",
     "Drop → Stand KM": t.dropToStandKm ?? "-",
+    // e.g. "CNG 500, Petrol 400, Food 200"
+    "Expense Breakdown": Object.entries(t.expenseBreakdown ?? {})
+      .map(([cat, amt]) => `${cat} ${amt}`)
+      .join(", ") || "-",
     "Company Expenses (₹)": t.expenseTotal ?? 0,
     "Profit (₹)": t.profit ?? t.customerTotal - (t.expenseTotal ?? 0),
     "Payment Status": t.remainingBalance <= 0 ? "Fully Paid" : t.totalPaid > 0 ? "Partially Paid" : "Unpaid",
@@ -98,7 +103,8 @@ export function exportTripsToXLSX(
     { wch: 12 }, // Stand In KM
     { wch: 16 }, // Stand -> Pickup KM
     { wch: 16 }, // Drop -> Stand KM
-    { wch: 16 }, // Expenses
+    { wch: 36 }, // Expense Breakdown
+    { wch: 16 }, // Expenses (sum)
     { wch: 14 }, // Profit
     { wch: 14 }, // Payment Status
     { wch: 14 }, // Trip Status

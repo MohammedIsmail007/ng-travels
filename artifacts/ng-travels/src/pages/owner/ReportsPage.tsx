@@ -88,6 +88,15 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       standToPickupKm: t.standToPickupKm != null ? Number(t.standToPickupKm) : null,
       dropToStandKm: t.dropToStandKm != null ? Number(t.dropToStandKm) : null,
       expenseTotal: Number(t.expenseTotal || 0),
+      expenseBreakdown: expenseList
+        .filter((e: any) => e.tripId === t.id && e.status === "approved")
+        .reduce((acc: Record<string, number>, e: any) => {
+          // "Fuel - CNG" -> "CNG"; plain categories stay as-is
+          const raw = String(e.category || "Other");
+          const cat = raw.includes(" - ") ? raw.split(" - ").slice(1).join(" - ") : raw;
+          acc[cat] = (acc[cat] || 0) + Number(e.amount || 0);
+          return acc;
+        }, {}),
       profit: Number(t.customerTotal || 0) - Number(t.expenseTotal || 0),
       paymentStatus: Number(t.remainingBalance || 0) <= 0 ? "Fully Paid" : Number(t.totalPaid || 0) > 0 ? "Partially Paid" : "Unpaid",
       status: t.status,

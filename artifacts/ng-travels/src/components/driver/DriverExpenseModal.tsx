@@ -18,6 +18,15 @@ export interface DriverExpenseModalProps {
 const MAX_RECEIPT_BYTES = 8 * 1024 * 1024;
 const ACCEPTED_RECEIPT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif", "application/pdf"];
 
+// Categories that cover several distinct expenses. The driver picks the exact
+// one; it is saved as "<Category> - <Option>" (e.g. "Fuel - CNG") so reports
+// can show it individually.
+const CATEGORY_OPTIONS: Record<string, string[]> = {
+  Fuel: ["Petrol", "Diesel", "CNG"],
+  Food: ["Driver Food", "Bata"],
+  Maintenance: ["Puncture", "Repair"],
+};
+
 export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
   isOpen,
   onClose,
@@ -25,6 +34,8 @@ export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
   onExpenseAdded,
 }) => {
   const [category, setCategory] = useState("Fuel");
+  const [subCategory, setSubCategory] = useState("");
+  const [otherLabel, setOtherLabel] = useState("");
   const [amount, setAmount] = useState("500");
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState("");
@@ -62,6 +73,14 @@ export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
 
   const handleSubmit = async () => {
     if (!amount || Number(amount) <= 0) return;
+    if (CATEGORY_OPTIONS[category] && !subCategory) {
+      setError(`Please select the exact ${category.toLowerCase()} type.`);
+      return;
+    }
+    const finalCategory =
+      CATEGORY_OPTIONS[category] ? `${category} - ${subCategory}`
+      : category === "Other" && otherLabel.trim() ? `Other - ${otherLabel.trim()}`
+      : category;
     if (!receiptFile) {
       setError("A photo or PDF proof of payment is required before submitting this expense.");
       return;
@@ -89,7 +108,7 @@ export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tripId,
-          category,
+          category: finalCategory,
           amount: Number(amount),
           notes,
           location,
@@ -124,7 +143,7 @@ export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
         <div className="space-y-4 pt-2 text-xs">
           <div>
             <label className="text-xs text-muted-foreground font-semibold uppercase block mb-1">Expense Category</label>
-            <Select value={category} onValueChange={setCategory}>
+            <Select value={category} onValueChange={(v) => { setCategory(v); setSubCategory(""); }}>
               <SelectTrigger className="bg-card border-border">
                 <SelectValue />
               </SelectTrigger>
@@ -140,6 +159,36 @@ export const DriverExpenseModal: React.FC<DriverExpenseModalProps> = ({
               </SelectContent>
             </Select>
           </div>
+
+          {CATEGORY_OPTIONS[category] && (
+            <div>
+              <label className="text-xs text-muted-foreground font-semibold uppercase block mb-1">
+                {category} Type <span className="text-rose-600 dark:text-rose-400">*</span>
+              </label>
+              <Select value={subCategory} onValueChange={setSubCategory}>
+                <SelectTrigger className="bg-card border-border">
+                  <SelectValue placeholder={`Select ${category.toLowerCase()} type`} />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border text-foreground">
+                  {CATEGORY_OPTIONS[category].map((opt) => (
+                    <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {category === "Other" && (
+            <div>
+              <label className="text-xs text-muted-foreground font-semibold uppercase block mb-1">What was it for?</label>
+              <Input
+                value={otherLabel}
+                onChange={(e) => setOtherLabel(e.target.value)}
+                placeholder="e.g. Car wash"
+                className="bg-card border-border text-xs"
+              />
+            </div>
+          )}
 
           <div>
             <label className="text-xs text-muted-foreground font-semibold uppercase block mb-1">Amount (₹)</label>

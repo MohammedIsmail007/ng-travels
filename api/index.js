@@ -97037,6 +97037,10 @@ function tripView(trip, customer) {
     toll: numeric2(trip.finalToll ?? trip.toll),
     parking: numeric2(trip.parking),
     waitingCharge: numeric2(trip.waitingCharge),
+    nightCharge: numeric2(trip.nightCharge),
+    driverBata: numeric2(trip.driverBata),
+    tax: numeric2(trip.tax),
+    billableDays: trip.billableDays ?? 1,
     discount: numeric2(trip.discount),
     permitCharge: numeric2(trip.permitCharge),
     customerTotal: numeric2(trip.customerTotal),
@@ -98984,8 +98988,9 @@ router2.post("/trips/:id/stand-return", async (req, res) => {
     broadcastRealtimeEvent("TRIP_UPDATED", view);
     res.json(view);
   } catch (err) {
-    console.error("[trips/stand-return] Error:", err);
-    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: "Failed to record back-at-stand KM" } });
+    console.error("[trips/stand-return] Error:", err, err?.cause);
+    const reason = err?.cause?.message || err?.message;
+    res.status(500).json({ success: false, error: { code: "DATABASE_ERROR", message: reason ? `Failed to record back-at-stand KM: ${reason}` : "Failed to record back-at-stand KM" } });
   }
 });
 router2.post("/trips/:id/billing", async (req, res) => {

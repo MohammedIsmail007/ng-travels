@@ -55,7 +55,7 @@ export const ExpensesPage: React.FC<ExpensesPageProps> = ({
 
   const filtered = expenseList.filter((e: any) => {
     if (statusFilter !== "all" && e.status !== statusFilter) return false;
-    if (categoryFilter !== "all" && e.category !== categoryFilter) return false;
+    if (categoryFilter !== "all" && e.category !== categoryFilter && !String(e.category).startsWith(`${categoryFilter} - `)) return false;
     return true;
   });
 
