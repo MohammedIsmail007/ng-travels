@@ -14,8 +14,12 @@ import {
   Key,
   Loader2,
   Trash2,
+  Edit2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NGTravelsLoader } from "@/components/loading";
 import { ConfirmDeleteDialog } from "@/components/common/ConfirmDeleteDialog";
 import {
@@ -62,6 +66,49 @@ export const DriversPage: React.FC<DriversPageProps> = ({
     },
     onError: (err: any) => toast.error(err.message),
   });
+
+  const [editingDriver, setEditingDriver] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", mobile: "", licenseNumber: "", notes: "" });
+
+  const openEdit = (drv: any) => {
+    setEditingDriver(drv);
+    setEditForm({
+      name: drv.name || "",
+      mobile: drv.mobile || "",
+      licenseNumber: drv.licenseNumber || "",
+      notes: drv.notes || "",
+    });
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: number; payload: typeof editForm }) => {
+      const res = await apiFetch(`/api/drivers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || "Failed to update driver");
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/drivers"] });
+      toast.success("Driver updated");
+      setEditingDriver(null);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm.name.trim() || !editForm.mobile.trim()) {
+      toast.error("Name and mobile are required");
+      return;
+    }
+    updateMutation.mutate({ id: editingDriver.id, payload: editForm });
+  };
 
   const handleAvailabilityClick = async (driverId: number, availability: string) => {
     if (!onUpdateAvailability || pendingUpdate) return;
@@ -213,6 +260,13 @@ export const DriversPage: React.FC<DriversPageProps> = ({
                   {drv.availability?.replaceAll("_", " ")}
                 </span>
                 <button
+                  onClick={() => openEdit(drv)}
+                  className="p-1.5 rounded-lg bg-muted/80 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  title="Edit driver"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button
                   onClick={() => setDeletingDriver(drv)}
                   className="p-1.5 rounded-lg bg-muted/80 hover:bg-rose-100 hover:dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors cursor-pointer"
                   title="Delete driver"
@@ -303,6 +357,40 @@ export const DriversPage: React.FC<DriversPageProps> = ({
           ))}
         </div>
       )}
+
+      <Dialog open={Boolean(editingDriver)} onOpenChange={(open) => !open && setEditingDriver(null)}>
+        <DialogContent className="sm:max-w-md bg-background border-border text-foreground p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Edit Driver</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleEditSubmit} className="space-y-3 pt-2">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Name *</Label>
+              <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Mobile *</Label>
+              <Input value={editForm.mobile} onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Driving License</Label>
+              <Input value={editForm.licenseNumber} onChange={(e) => setEditForm({ ...editForm, licenseNumber: e.target.value })} className="bg-card border-border text-xs font-mono" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Notes</Label>
+              <Input value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEditingDriver(null)} className="w-1/2 text-xs">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={updateMutation.isPending} className="w-1/2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs">
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         isOpen={Boolean(deletingDriver)}

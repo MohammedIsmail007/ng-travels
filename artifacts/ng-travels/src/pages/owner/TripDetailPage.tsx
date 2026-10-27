@@ -312,11 +312,12 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
               <Button
                 size="sm"
                 variant="outline"
+                disabled={trip.standReturnKm != null}
                 onClick={() => onOpenStandKmModal(trip)}
-                className="w-full h-9 text-xs border-purple-300 dark:border-purple-500/40 text-purple-700 dark:text-purple-300 hover:bg-purple-950/20 cursor-pointer"
+                className="w-full h-9 text-xs border-purple-300 dark:border-purple-500/40 text-purple-700 dark:text-purple-300 hover:bg-purple-950/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
               >
                 <Gauge className="w-3.5 h-3.5 mr-1.5" />
-                {trip.standReturnKm != null ? "Correct Back-at-Stand KM" : "Record Back-at-Stand KM"}
+                {trip.standReturnKm != null ? "Back-at-Stand KM Recorded" : "Record Back-at-Stand KM"}
               </Button>
             )}
           </div>
@@ -425,10 +426,11 @@ export const TripDetailPage: React.FC<TripDetailPageProps> = ({
               </div>
               <Button
                 size="sm"
+                disabled={trip.endingKm != null && Number(trip.billingKm || 0) > 0}
                 onClick={() => onOpenEndKmModal(trip)}
-                className="h-8 text-xs bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold shrink-0"
+                className="h-8 text-xs bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold shrink-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
               >
-                Edit Billing
+                {trip.endingKm != null && Number(trip.billingKm || 0) > 0 ? "Billing Recorded" : "Edit Billing"}
               </Button>
             </div>
           )}

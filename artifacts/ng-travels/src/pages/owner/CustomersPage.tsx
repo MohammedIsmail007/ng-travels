@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Users, Search, Plus, Phone, Mail, MapPin, ArrowUpRight, CheckCircle2, CircleDollarSign, Trash2 } from "lucide-react";
+import { Users, Search, Plus, Phone, Mail, MapPin, ArrowUpRight, CheckCircle2, CircleDollarSign, Trash2, Edit2 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch } from "@/lib/apiFetch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +39,44 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], is
     },
     onError: (err: any) => toast.error(err.message),
   });
+
+  const [editingCustomer, setEditingCustomer] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", mobile: "", email: "", address: "" });
+
+  const openEdit = (c: any) => {
+    setEditingCustomer(c);
+    setEditForm({ name: c.name || "", mobile: c.mobile || "", email: c.email || "", address: c.address || "" });
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: number; payload: typeof editForm }) => {
+      const res = await apiFetch(`/api/customers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error?.message || "Failed to update customer");
+      }
+      return res.json();
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/customers"] });
+      toast.success("Customer updated");
+      setEditingCustomer(null);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm.name.trim() || !editForm.mobile.trim()) {
+      toast.error("Name and mobile are required");
+      return;
+    }
+    updateMutation.mutate({ id: editingCustomer.id, payload: editForm });
+  };
 
   const customerList = Array.isArray(customers) ? customers : (Array.isArray((customers as any)?.items) ? (customers as any).items : []);
 
@@ -109,6 +149,13 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], is
                   {c.totalTrips || 0} Trip(s)
                 </span>
                 <button
+                  onClick={() => openEdit(c)}
+                  className="p-1.5 rounded-lg bg-muted/80 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  title="Edit customer"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button
                   onClick={() => setDeletingCustomer(c)}
                   className="p-1.5 rounded-lg bg-muted/80 hover:bg-rose-100 hover:dark:bg-rose-500/20 text-rose-700 dark:text-rose-400 transition-colors cursor-pointer"
                   title="Delete customer"
@@ -153,6 +200,40 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({ customers = [], is
         ))}
         </div>
       )}
+
+      <Dialog open={Boolean(editingCustomer)} onOpenChange={(open) => !open && setEditingCustomer(null)}>
+        <DialogContent className="sm:max-w-md bg-background border-border text-foreground p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Edit Customer</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleEditSubmit} className="space-y-3 pt-2">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Name *</Label>
+              <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Mobile *</Label>
+              <Input value={editForm.mobile} onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Email</Label>
+              <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Address</Label>
+              <Input value={editForm.address} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} className="bg-card border-border text-xs" />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEditingCustomer(null)} className="w-1/2 text-xs">
+                Cancel
+              </Button>
+              <Button type="submit" disabled={updateMutation.isPending} className="w-1/2 bg-amber-400 hover:bg-amber-300 text-zinc-950 font-bold text-xs">
+                Save Changes
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         isOpen={Boolean(deletingCustomer)}
